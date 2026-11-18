@@ -24,11 +24,9 @@ export class ImportPage {
   account = '';
   auditBatch = '';
   auditPage = 0;
-  reviewPage = 0;
   file: FilePreview | null = null;
   preview: ImportPreview | null = null;
   acceptRejected = false;
-  decisions: Record<string, 'keep' | 'skip'> = {};
   delimiter: Mapping['delimiter'] = ',';
   encoding: Mapping['encoding'] = 'utf-8';
   header = 1;
@@ -72,12 +70,9 @@ export class ImportPage {
     ],
     rows: this.audit().map((row) => ({ ...row, values: row.original.join(' · ') })),
   }));
-  readonly overlapChoices = [
-    { value: undefined, label: 'Choose' }, { value: 'skip', label: 'Skip duplicate' }, { value: 'keep', label: 'Keep transaction' },
-  ];
   fields(): Column[] { return ['date', 'description', ...(this.layout === 'signed' ? ['amount'] as const : ['debit', 'credit'] as const), 'balance', 'reference']; }
-  headers() { return this.file?.rows[Math.min(this.file.header - 1, 3)] ?? []; }
-  invalidate() { this.preview = null; this.acceptRejected = false; this.decisions = {}; this.reviewPage = 0; }
+  headers() { return this.file?.headers ?? []; }
+  invalidate() { this.preview = null; this.acceptRejected = false; }
   reset() { this.file = null; this.invalidate(); }
   choose() {
     return this.ui.run(async () => {
@@ -88,13 +83,7 @@ export class ImportPage {
       this.delimiter = file.delimiter;
       this.encoding = file.encoding;
       this.header = file.header;
-      const saved = file.saved?.delimiter === file.delimiter && file.saved.header === file.header &&
-        file.saved.date === file.suggested.date && file.saved.description === file.suggested.description &&
-        file.saved.amount === file.suggested.amount && file.saved.debit === file.suggested.debit && file.saved.credit === file.suggested.credit ? file.saved : null;
-      this.dateFormat = saved?.dateFormat ?? '';
-      this.decimal = saved?.decimal ?? '';
-      this.invert = saved?.invert ?? false;
-      this.useSuggestions(saved ?? file.suggested);
+      this.useFileMapping(file);
     });
   }
   cancel() {
@@ -103,7 +92,19 @@ export class ImportPage {
       this.reset();
     });
   }
-  useSuggestions(suggestion: Partial<Mapping>) {
+  private useFileMapping(file: FilePreview) {
+    const saved = file.saved?.delimiter === file.delimiter && file.saved.header === file.header &&
+      file.saved.date === file.suggested.date && file.saved.description === file.suggested.description &&
+      file.saved.amount === file.suggested.amount && file.saved.debit === file.suggested.debit &&
+      file.saved.credit === file.suggested.credit && file.saved.balance === file.suggested.balance &&
+      file.saved.reference === file.suggested.reference ? file.saved : null;
+    this.dateFormat = file.suggested.dateFormat ?? saved?.dateFormat ?? '';
+    this.decimal = file.suggested.decimal ?? saved?.decimal ?? '';
+    this.invert = saved?.invert ?? false;
+    this.useSuggestions(saved ?? file.suggested);
+  }
+
+  private useSuggestions(suggestion: Partial<Mapping>) {
     this.columns = Object.fromEntries(Object.keys(this.labels).map((key) => [key, suggestion[key as Column]]));
     this.layout = suggestion.amount === undefined && suggestion.debit !== undefined ? 'separate' : 'signed';
   }
@@ -111,7 +112,7 @@ export class ImportPage {
     return this.ui.run(async () => {
       if (!this.file) return;
       this.file = await this.ui.api.decodeImport({ token: this.file.token, delimiter: this.delimiter, encoding: this.encoding, header: this.header });
-      this.useSuggestions(this.file.suggested);
+      this.useFileMapping(this.file);
       this.invalidate();
     });
   }
@@ -130,14 +131,12 @@ export class ImportPage {
       } });
     });
   }
-  reviewed() { return this.preview?.review.every((row) => Boolean(this.decisions[row.row])) ?? false; }
-  setReviews(value: 'skip' | 'keep') { for (const row of this.preview?.review ?? []) this.decisions[row.row] = value; }
   errors() { return this.ui.run(async () => { if (this.file) await this.ui.api.exportErrors({ id: this.file.token }); }); }
   commit() {
     return this.ui.run(async () => {
       if (!this.file || !this.preview) return;
       const result = await this.ui.api.commitImport({ token: this.file.token, version: this.preview.version,
-        acceptRejected: this.acceptRejected, decisions: this.decisions });
+        acceptRejected: this.acceptRejected });
       this.reset();
       this.batches.set(await this.ui.api.batches());
       this.ui.info.set(`Import complete. ${result.inserted} added, ${result.duplicate} duplicates, ${result.rejected} rejected.`);

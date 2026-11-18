@@ -9,7 +9,7 @@ import { exportBackup, restoreBackup } from '../src/features/backup-restore/main
 import { categories, mergeCategories, restoreDefaults, saveCategory } from '../src/features/categories/main';
 import { listRules, recategorize, saveRule } from '../src/features/categorization/main';
 import { Imports } from '../src/features/import-statement/main';
-import { mapping as mappingSchema, type ImportPreview, type Mapping } from '../src/features/import-statement/contract';
+import { commitInput, mapping as mappingSchema, type ImportPreview, type Mapping } from '../src/features/import-statement/contract';
 import { getBudget, recommend, saveAllocation, setClosed } from '../src/features/monthly-budget/main';
 import { fullyCovered, scheduledAmount } from '../src/features/monthly-budget/domain';
 import { ProfileStore } from '../src/features/profiles/main';
@@ -41,12 +41,12 @@ const file = (name: string, contents: string) => { const path = join(root, name)
 
 async function preview(path: string, accountId: string, options: Partial<Mapping> = {}) {
   const { token, suggested, delimiter, encoding, header } = await imports.select(db(), active().id, accountId, path);
-  const mapping = mappingSchema.parse({ ...suggested, delimiter, encoding, header, dateFormat: 'ymd', decimal: '.', ...options });
+  const mapping = mappingSchema.parse({ ...suggested, delimiter, encoding, header, dateFormat: suggested.dateFormat ?? 'ymd', decimal: suggested.decimal ?? '.', ...options });
   const statement = imports.preview(db(), active().id, token, mapping);
   return { token, statement };
 }
-function commit(token: string, statement: ImportPreview, decisions: Record<string, 'keep' | 'skip'> = {}, acceptRejected = false) {
-  return imports.commit(db(), active().id, { token, version: statement.version, decisions, acceptRejected });
+function commit(token: string, statement: ImportPreview, acceptRejected = false) {
+  return imports.commit(db(), active().id, { token, version: statement.version, acceptRejected });
 }
 async function importFile(path: string, accountId: string, options: Partial<Mapping> = {}) {
   const { token, statement } = await preview(path, accountId, options);
@@ -72,6 +72,8 @@ describe('finance boundaries', () => {
     expect(() => parseMoney('10,0.30', '.')).toThrow();
     expect(() => parseMoney('1.111', '.')).toThrow();
     expect(() => parseMoney('90071992547409.92', '.')).toThrow();
+    expect(parseDate('20240229', 'ymd')).toBe('2024-02-29');
+    expect(() => parseDate('20250229', 'ymd')).toThrow(/posting date/);
     expect(parseDate('29/02/2024', 'dmy')).toBe('2024-02-29');
     expect(() => parseDate('29/02/2025', 'dmy')).toThrow();
     expect(csvText('  =SUM(1)')).toBe("'  =SUM(1)");
@@ -108,26 +110,57 @@ it('keeps profiles isolated, seeds once, and uses a genuinely encrypted database
   checkIntegrity(db());
 });
 
-it('imports both layouts, preserves identical purchases, and guards retries and overlap', async () => {
+it('imports both layouts, preserves distinguishable repeats, and skips duplicates', async () => {
   const main = account();
-  const statement = file('first.csv', 'Date,Description,Amount\n2025-05-01,Same shop,-10.00\n2025-05-01,Same shop,-10.00\n');
-  expect((await importFile(statement, main.id)).inserted).toBe(2);
-  expect((await importFile(statement, main.id)).inserted).toBe(0);
-  const overlap = file('overlap.csv', 'Date,Description,Amount\n2025-05-01,Same shop,-10.00\n2025-05-01,Same shop,-10.00\n2025-05-02,New shop,-20.00\n');
-  const overlapping = await preview(overlap, main.id);
-  expect(overlapping.statement.counts.review).toBe(2);
-  expect(() => commit(overlapping.token, overlapping.statement)).toThrow(/Review/);
-  expect(commit(overlapping.token, overlapping.statement, { 2: 'skip', 3: 'skip' })).toMatchObject({ inserted: 1, duplicate: 2 });
+  const original = file('first.csv', [
+    'Date,Description,Amount,Balance',
+    '20250501,Synthetic shop,-10.00,90.00',
+    '20250501,Synthetic shop,-10.00,80.00',
+    '20250501, synthetic SHOP ,-10.00,80.00',
+  ].join('\n'));
+  expect((await imports.select(db(), active().id, main.id, original)).suggested)
+    .toMatchObject({ dateFormat: 'ymd', decimal: '.', balance: 3 });
+  const initial = await preview(original, main.id);
+  expect(initial.statement.reconciliation).toBeNull();
+  expect(initial.statement.net).toBe(-2000);
+  expect(commit(initial.token, initial.statement)).toMatchObject({ inserted: 2, duplicate: 1 });
+  expect((await importFile(original, main.id))).toMatchObject({ inserted: 0, duplicate: 3 });
+  const overlap = file('overlap.csv', [
+    'Date,Description,Amount,Balance',
+    '2025-05-01,Synthetic shop,-10.00,80.00',
+    '2025-05-01,Synthetic shop,-10.00,70.00',
+  ].join('\r\n'));
+  expect(await importFile(overlap, main.id)).toMatchObject({ inserted: 1, duplicate: 1 });
+
+  const noBalance = file('no-balance.csv', [
+    'Date,Description,Amount',
+    '2025-05-01,Synthetic shop,-10.00',
+    '2025-05-02,Another shop,-20.00',
+    '2025-05-02,Another shop,-20.00',
+  ].join('\n'));
+  const ambiguous = await preview(noBalance, main.id);
+  expect(ambiguous.statement.counts).toMatchObject({ accepted: 1, duplicate: 2 });
+  expect(ambiguous.statement.rows.at(-1)?.message).toContain('Possible duplicate skipped');
+  expect(commitInput.safeParse({ token: ambiguous.token, version: ambiguous.statement.version,
+    acceptRejected: false, decisions: { 2: 'keep' } }).success).toBe(false);
+  expect(commit(ambiguous.token, ambiguous.statement)).toMatchObject({ inserted: 1, duplicate: 2 });
+  const card = account('Card', 'credit-card');
+  await expect(preview(original, card.id)).rejects.toThrow(/already been imported into another account/);
+  expect(transactions()).toHaveLength(4);
+});
+
+it('imports corrected rejected rows without repeating accepted ones', async () => {
+  const main = account();
   const partial = file('partial.csv', 'Date,Description,Amount\n2025-05-05,Valid,-10\n06/05/2025,Date repair,-2\n');
   const rejected = await preview(partial, main.id);
   expect(rejected.statement.counts.rejected).toBe(1);
-  expect(commit(rejected.token, rejected.statement, {}, true).inserted).toBe(1);
+  expect(commit(rejected.token, rejected.statement, true).inserted).toBe(1);
   const corrected = await preview(partial, main.id, { dateFormat: 'dmy' });
   expect(commit(corrected.token, corrected.statement).inserted).toBe(1);
   const card = account('Card', 'credit-card');
   expect((await importFile(fixture('absa-card.csv'), card.id, { dateFormat: 'dmy', decimal: ',' })).inserted).toBe(2);
   expect(transaction('Shop purchase').amount).toBe(-30000);
-  expect(transactions()).toHaveLength(7);
+  expect(transactions()).toHaveLength(4);
 });
 
 it('rolls back the entire import when a later database write fails', async () => {

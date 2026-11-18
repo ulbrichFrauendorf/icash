@@ -23,18 +23,17 @@ export const mapping = z.object({
 export const previewInput = z.object({ token: id, mapping });
 export const commitInput = z.object({
   token: id, version: id, acceptRejected: z.boolean(),
-  decisions: z.record(z.string().regex(/^\d+$/), z.enum(['keep', 'skip'])),
-});
+}).strict();
 export type Mapping = z.infer<typeof mapping>;
 export type Candidate = { date: string; description: string; amount: number; balance: number | null; reference: string | null };
-export type FilePreview = { token: string; fileName: string; delimiter: Mapping['delimiter']; encoding: Mapping['encoding']; header: number; rows: string[][]; suggested: Partial<Mapping>; saved: Mapping | null };
+export type FilePreview = { token: string; fileName: string; delimiter: Mapping['delimiter']; encoding: Mapping['encoding']; header: number; headers: string[]; rows: string[][]; suggested: Partial<Mapping>; saved: Mapping | null };
 export type RowPreview = {
   row: number; candidate?: Candidate; original: string[];
-  state: 'accepted' | 'duplicate' | 'rejected' | 'skipped' | 'review'; message: string; matches?: Candidate[];
+  state: 'accepted' | 'duplicate' | 'rejected' | 'skipped'; message: string;
 };
 export type ImportPreview = {
   version: string; counts: Record<RowPreview['state'], number>; debits: number; credits: number; net: number;
-  rows: RowPreview[]; review: RowPreview[]; reconciliation: string | null;
+  rows: RowPreview[]; reconciliation: string | null;
 };
 export type ImportResult = { id: string; inserted: number; duplicate: number; rejected: number };
 export type Batch = ImportResult & { account: string; file: string; createdAt: string; skipped: number };

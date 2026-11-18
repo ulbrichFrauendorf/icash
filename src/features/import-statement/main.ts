@@ -9,19 +9,21 @@ import { cents, normalizeText } from '../../shared/finance';
 import { UserError } from '../../shared/schema';
 import { categorizer } from '../categorization/main';
 import { mapping as mappingSchema, type AuditRow, type Batch, type Candidate, type FilePreview, type ImportPreview, type Mapping, type RowPreview, type commitInput, type decodeInput } from './contract';
-import { matchKey, normalizeRow, suggestMapping } from './domain';
+import { matchKey, normalizeRow, suggestFormats, suggestMapping } from './domain';
 
 const fileLimit = 12 * 1024 * 1024;
 const rowLimit = 60000;
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 
 type ParsedRow = { original: string[]; row: number };
-type PreparedRow = RowPreview & { matchedId?: string; possibleIds?: string[] };
+type PreparedRow = RowPreview & { matchedId?: string; matchedRow?: number };
 type Session = {
   profileId: string; accountId: string; fileName: string; hash: string; bytes: Buffer;
   preview?: { version: string; mapping: Mapping; rows: PreparedRow[]; ledgerVersion: number };
 };
 type Existing = Candidate & { id: string };
+type DuplicateMatch = { balance: number | null; matchedId?: string; matchedRow?: number };
+type SeenTransactions = { first: DuplicateMatch; byBalance: Map<number, DuplicateMatch>; withoutBalance?: DuplicateMatch };
 
 function parseFile(bytes: Buffer, format: Pick<Mapping, 'delimiter' | 'encoding'>, preview = false): ParsedRow[] {
   try {
@@ -92,7 +94,7 @@ export class Imports {
       } catch { return []; }
     }).sort((a, b) => Number(b.index >= 0) - Number(a.index >= 0) || b.width - a.width);
     const choice = options[0];
-    if (!choice) return { token, fileName: session.fileName, delimiter: ',', encoding, header: 1, rows: [], suggested: {}, saved };
+    if (!choice) return { token, fileName: session.fileName, delimiter: ',', encoding, header: 1, headers: [], rows: [], suggested: {}, saved };
     return this.decode(db, profileId, { token, encoding, delimiter: choice.delimiter, header: choice.index >= 0 && choice.index < 50 ? choice.index + 1 : 1 });
   }
 
@@ -113,9 +115,14 @@ export class Imports {
     session.preview = undefined;
     const records = parseFile(session.bytes, input, true);
     const shown = records.slice(Math.max(0, input.header - 4), input.header + 5).map((row) => row.original);
-    const header = records[input.header - 1]?.original ?? [];
+    const headers = records[input.header - 1]?.original ?? [];
+    const columns = suggestMapping(headers);
+    const headerKey = headers.map(normalizeText).join('\u001f');
+    const sample = records.slice(input.header).map(({ original }) => original)
+      .filter((row) => row.map(normalizeText).join('\u001f') !== headerKey);
     return {
-      ...input, fileName: session.fileName, rows: shown, suggested: suggestMapping(header),
+      ...input, fileName: session.fileName, rows: shown, headers,
+      suggested: { ...columns, ...suggestFormats(sample, columns) },
       saved: this.saved(db, session.accountId),
     };
   }
@@ -128,6 +135,12 @@ export class Imports {
     if (!header) throw new UserError('The selected header row does not exist.');
     if ([mapping.date,mapping.description,mapping.amount,mapping.debit,mapping.credit,mapping.balance,mapping.reference]
       .some((column) => column !== undefined && column >= header.length)) throw new UserError('A mapped column is missing from the header.');
+    if (db.prepare(`
+      SELECT 1 FROM import_batches b JOIN transactions t ON t.batch_id=b.id
+      WHERE b.file_hash=? AND b.account_id<>? LIMIT 1
+    `).get(session.hash, session.accountId)) {
+      throw new UserError('This statement has already been imported into another account. Select the original account.');
+    }
     const priorRows = db.prepare(`
       SELECT row_number AS row, transaction_id AS id FROM import_rows r JOIN import_batches b ON b.id=r.batch_id
       WHERE b.account_id=? AND b.file_hash=? AND r.state IN ('accepted','duplicate')
@@ -136,54 +149,48 @@ export class Imports {
     const existing = db.prepare(`
       SELECT id,date,description,amount,balance,reference FROM transactions WHERE account_id=? ORDER BY date,id
     `).all(session.accountId) as Existing[];
-    const reserved = new Set(priorRows.flatMap(({ id }) => id ? [id] : []));
-    const byKey = new Map<string, Existing[]>();
-    const strongMatches = new Map<string, Existing | null>();
-    const strongKey = (key: string, row: Candidate, includeReference: boolean) =>
-      JSON.stringify([key, row.balance, includeReference, includeReference ? row.reference : null]);
-    for (const row of existing) {
-      if (reserved.has(row.id)) continue;
-      const key = matchKey(row);
-      const list = byKey.get(key) ?? [];
-      list.push(row);
-      byKey.set(key, list);
-      if (row.balance === null) continue;
-      for (const exact of [false, true]) {
-        const identity = strongKey(key, row, exact);
-        strongMatches.set(identity, strongMatches.has(identity) ? null : row);
+    const seen = new Map<string, SeenTransactions>();
+    const remember = (key: string, match: DuplicateMatch) => {
+      let group = seen.get(key);
+      if (!group) {
+        group = { first: match, byBalance: new Map() };
+        seen.set(key, group);
       }
-    }
+      if (match.balance === null) group.withoutBalance ??= match;
+      else if (!group.byBalance.has(match.balance)) group.byBalance.set(match.balance, match);
+    };
+    for (const row of existing) remember(matchKey(row), { balance: row.balance, matchedId: row.id });
     const headerKey = header.map(normalizeText).join('\u001f');
-    const prepared = records.map(({ original, row }, index): PreparedRow => {
+    return records.map(({ original, row }, index): PreparedRow => {
       const result = { row, original };
       if (index < mapping.header || original.every((value) => !value.trim()) ||
           original.map(normalizeText).join('\u001f') === headerKey) {
         return { ...result, state: 'skipped', message: 'Header, preamble, or blank row.' };
       }
-      if (prior.has(row)) return { ...result, state: 'duplicate', message: 'Already handled in this file.', matchedId: prior.get(row) ?? undefined };
-      let candidate: Candidate;
+      const alreadyHandled = prior.has(row);
+      let candidate: Candidate | undefined;
       try { candidate = normalizeRow(original, mapping); }
-      catch (error) { return { ...result, state: 'rejected', message: (error as Error).message }; }
-      const strong = candidate.amount && candidate.balance !== null
-        ? strongMatches.get(strongKey(matchKey(candidate), candidate, Boolean(candidate.reference))) : null;
-      if (strong && !reserved.has(strong.id)) {
-        reserved.add(strong.id);
-        return { ...result, candidate, state: 'duplicate', message: 'Matched amount, description, date, and running balance.', matchedId: strong.id };
+      catch (error) {
+        if (!alreadyHandled) return { ...result, state: 'rejected', message: (error as Error).message };
       }
+      if (alreadyHandled) {
+        return { ...result, candidate, state: 'duplicate', message: 'Already handled in this file.', matchedId: prior.get(row) ?? undefined };
+      }
+      if (!candidate) throw new Error('An import row did not produce a transaction.');
+      const key = matchKey(candidate);
+      const group = seen.get(key);
+      // Prefer a confirmed balance match. Missing balances make otherwise identical transactions indistinguishable.
+      const match = candidate.balance === null ? group?.first : group?.byBalance.get(candidate.balance) ?? group?.withoutBalance;
+      if (match) {
+        const message = candidate.balance === null || match.balance === null
+          ? 'Possible duplicate skipped. A running balance is needed to distinguish these transactions.'
+          : match.matchedRow !== undefined
+            ? 'Duplicate transaction in this statement.'
+            : 'Already in this account with the same running balance.';
+        return { ...result, candidate, state: 'duplicate', message, matchedId: match.matchedId, matchedRow: match.matchedRow };
+      }
+      remember(key, { balance: candidate.balance, matchedRow: row });
       return { ...result, candidate, state: 'accepted', message: '' };
-    });
-    const comparisons = new Map([...byKey.entries()].map(([key, entries]) => {
-      const available = entries.filter((row) => !reserved.has(row.id));
-      return [key, {
-        possibleIds: available.map((row) => row.id),
-        matches: available.slice(0, 3).map(({ date, description, amount, balance, reference }) => ({ date, description, amount, balance, reference })),
-      }] as const;
-    }));
-    return prepared.map((row) => {
-      if (row.state !== 'accepted' || !row.candidate) return row;
-      const comparison = comparisons.get(matchKey(row.candidate));
-      if (!comparison?.possibleIds.length) return row;
-      return { ...row, ...comparison, state: 'review', message: 'Possible overlap. Compare existing entries before choosing.' };
     });
   }
 
@@ -192,16 +199,16 @@ export class Imports {
     const rows = this.prepare(db, session, mapping);
     const version = randomUUID();
     session.preview = { version, mapping, rows, ledgerVersion: this.ledgerVersion };
-    const counts = { accepted: 0, duplicate: 0, rejected: 0, skipped: 0, review: 0 };
+    const counts = { accepted: 0, duplicate: 0, rejected: 0, skipped: 0 };
     let debits = 0;
     let credits = 0;
     for (const row of rows) {
       counts[row.state]++;
-      if (!row.candidate || (row.state !== 'accepted' && row.state !== 'review')) continue;
+      if (!row.candidate || row.state !== 'accepted') continue;
       if (row.candidate.amount < 0) debits = cents(debits + row.candidate.amount);
       else credits = cents(credits + row.candidate.amount);
     }
-    const candidateRows = rows.flatMap((row) => row.candidate ? [row.candidate] : []);
+    const candidateRows = rows.flatMap((row) => row.candidate && row.matchedRow === undefined ? [row.candidate] : []);
     const comparable = candidateRows.slice(1).filter((row, index) => row.balance !== null && candidateRows[index]?.balance !== null);
     const forward = candidateRows.slice(1).every((row, index) => {
       const prior = candidateRows[index];
@@ -212,12 +219,11 @@ export class Imports {
       return !prior || row.balance === null || prior.balance === null || prior.balance - row.balance === prior.amount;
     });
     const reconciliation = comparable.length && !forward && !reverse ? 'Running balances do not reconcile. Verify mapping and statement continuity.' : null;
-    const present = ({ row, original, candidate, state, message, matches }: PreparedRow): RowPreview =>
-      ({ row, original, candidate, state, message, matches });
+    const present = ({ row, original, candidate, state, message }: PreparedRow): RowPreview =>
+      ({ row, original, candidate, state, message });
     return {
       version, counts, debits, credits, net: cents(debits + credits), reconciliation,
       rows: rows.filter((row) => row.state !== 'skipped').slice(0, 60).map(present),
-      review: rows.filter((row) => row.state === 'review').map(present),
     };
   }
 
@@ -244,29 +250,21 @@ export class Imports {
       const counts = { id: randomUUID(), inserted: 0, duplicate: 0, rejected: 0 };
       const rows = this.prepare(db, session, preview.mapping);
       if (rows.length !== preview.rows.length || rows.some((row, index) =>
-        row.state !== preview.rows[index]?.state || row.matchedId !== preview.rows[index]?.matchedId)) {
+        row.state !== preview.rows[index]?.state || row.matchedId !== preview.rows[index]?.matchedId ||
+          row.matchedRow !== preview.rows[index]?.matchedRow)) {
         throw new UserError('The ledger changed after preview. Validate the statement again.');
       }
       if (rows.some((row) => row.state === 'rejected') && !input.acceptRejected) throw new UserError('Confirm that rejected rows should be left out.');
-      if (rows.some((row) => row.state === 'review' && !input.decisions[row.row])) throw new UserError('Review all possible duplicates.');
       db.prepare('INSERT INTO import_batches VALUES(?,?,?,?,?,?,?)').run(counts.id, session.accountId,
         session.fileName, session.hash, mappingHash, new Date().toISOString(), Number(!rows.some((row) => row.state === 'rejected')));
       const classify = categorizer(db);
       const insert = db.prepare(`INSERT INTO transactions(id,account_id,batch_id,date,amount,description,normalized,balance,reference,
           treatment,category_id,classification,rule_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`);
       const audit = db.prepare('INSERT INTO import_rows VALUES(?,?,?,?,?,?)');
-      const claimed = new Map<string[], number>();
-      for (const row of rows) {
-        const state = row.state === 'review' ? input.decisions[row.row] === 'keep' ? 'accepted' : 'duplicate' : row.state;
-        let transactionId = row.matchedId ?? null;
-        if (state === 'duplicate' && row.state === 'review') {
-          const ids = row.possibleIds ?? [];
-          const index = claimed.get(ids) ?? 0;
-          const match = ids[index];
-          if (!match) throw new UserError('More rows were skipped than matching ledger entries. Keep the additional transactions.');
-          claimed.set(ids, index + 1);
-          transactionId = match;
-        }
+      const insertedByRow = new Map<number, string>();
+      for (const { state, ...row } of rows) {
+        let transactionId = row.matchedId ??
+          (row.matchedRow === undefined ? null : insertedByRow.get(row.matchedRow) ?? null);
         if (state === 'accepted' && row.candidate) {
           const candidate = row.candidate;
           const classification = classify({ ...candidate, accountId: session.accountId, merchant: '' });
@@ -274,6 +272,7 @@ export class Imports {
           insert.run(transactionId, session.accountId, counts.id, candidate.date, candidate.amount, candidate.description,
             normalizeText(candidate.description), candidate.balance, candidate.reference, classification.treatment,
             classification.categoryId, classification.classification, classification.ruleId);
+          insertedByRow.set(row.row, transactionId);
           counts.inserted++;
         }
         if (state === 'rejected') counts.rejected++;
@@ -282,7 +281,7 @@ export class Imports {
       }
       db.prepare('UPDATE accounts SET mapping=? WHERE id=?').run(JSON.stringify(preview.mapping), session.accountId);
       return counts;
-    })();
+    }).immediate();
     this.ledgerVersion++;
     this.clear();
     return result;

@@ -18,6 +18,25 @@ export function suggestMapping(headers: string[]): Partial<Mapping> {
   };
 }
 
+export function suggestFormats(rows: string[][], columns: Partial<Mapping>): Partial<Mapping> {
+  const values = (indexes: (number | undefined)[]) => rows
+    .flatMap((row) => indexes.flatMap((index) => index === undefined ? [] : [row[index]?.trim() ?? '']))
+    .filter(Boolean);
+  const uniqueFormat = <Format extends string>(
+    samples: string[], formats: readonly Format[], parse: (value: string, format: Format) => unknown,
+  ): Format | undefined => {
+    const matches = formats.filter((format) => samples.length > 0 && samples.every((sample) => {
+      try { parse(sample, format); return true; }
+      catch { return false; }
+    }));
+    return matches.length === 1 ? matches[0] : undefined;
+  };
+  return {
+    dateFormat: uniqueFormat(values([columns.date]), ['ymd', 'dmy', 'mdy'] as const, parseDate),
+    decimal: uniqueFormat(values([columns.amount, columns.debit, columns.credit, columns.balance]), ['.', ','] as const, parseMoney),
+  };
+}
+
 export function normalizeRow(values: string[], mapping: Mapping): Candidate {
   const read = (index: number | undefined) => index === undefined ? '' : (values[index] ?? '').trim();
   const description = read(mapping.description);

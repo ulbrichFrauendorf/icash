@@ -1,7 +1,7 @@
 Absa-style synthetic test data
 Date,Description,Amount,Balance,Reference
-2025-05-01,Salary,10000.00,10000.00,R1
-2025-05-02,Checkers groceries,-500.00,9500.00,R2
-2025-05-03,Checkers refund,80.00,9580.00,R3
-2025-05-04,Card settlement,-300.00,9280.00,R4
-2025-05-05,Transfer to savings,-1000.00,8280.00,R5
+20250501,Salary,10000.00,10000.00,R1
+20250502,Checkers groceries,-500.00,9500.00,R2
+20250503,Checkers refund,80.00,9580.00,R3
+20250504,Card settlement,-300.00,9280.00,R4
+20250505,Transfer to savings,-1000.00,8280.00,R5

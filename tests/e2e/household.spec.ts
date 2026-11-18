@@ -36,12 +36,16 @@ test('imports, corrects, budgets, restarts, and restores a household in Electron
     }, fixture);
     await nav('Import statements');
     await page.getByRole('button', { name: 'Choose CSV' }).click();
-    await choose(page, 'Date format', 'Year-month-day');
-    await choose(page, 'Decimal separator', 'Period (123.45)');
     await page.getByRole('button', { name: 'Validate statement' }).click();
     await expect(page.getByText(/5 ready/)).toBeVisible();
-    await page.getByRole('button', { name: 'Import reviewed rows' }).click();
+    await page.getByRole('button', { name: 'Import new rows' }).click();
     await expect(page.getByRole('status').filter({ hasText: /5 added/ })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Choose CSV' }).click();
+    await page.getByRole('button', { name: 'Validate statement' }).click();
+    await expect(page.getByText(/5 duplicates skipped/)).toBeVisible();
+    await page.getByRole('button', { name: 'Import new rows' }).click();
+    await expect(page.getByRole('status').filter({ hasText: /0 added, 5 duplicates/ })).toBeVisible();
 
     await nav('Transactions');
     await page.getByRole('button', { name: 'Review Checkers refund' }).click();

@@ -30,12 +30,17 @@ export function validDate(value: string): boolean {
 }
 
 export function parseDate(value: string, format: 'ymd' | 'dmy' | 'mdy'): string {
-  const parts = value.trim().split(/[-/.]/);
-  if (parts.length !== 3 || !parts.every((part) => /^\d+$/.test(part))) throw new Error('Invalid date.');
+  const text = value.trim();
+  const parts = format === 'ymd' && /^\d{8}$/.test(text)
+    ? [text.slice(0, 4), text.slice(4, 6), text.slice(6)]
+    : text.split(/[-/.]/);
+  if (parts.length !== 3 || !parts.every((part) => /^\d+$/.test(part))) {
+    throw new Error('Invalid posting date. Check the mapped date column and format.');
+  }
   const [a = '', b = '', c = ''] = parts;
   const [year, month, day] = format === 'ymd' ? [a, b, c] : format === 'dmy' ? [c, b, a] : [c, a, b];
   const result = [year, month.padStart(2, '0'), day.padStart(2, '0')].join('-');
-  if (!validDate(result)) throw new Error('Invalid date for selected format.');
+  if (!validDate(result)) throw new Error('Invalid posting date for the selected format.');
   return result;
 }
 

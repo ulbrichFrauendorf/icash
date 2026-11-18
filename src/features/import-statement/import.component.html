@@ -124,7 +124,7 @@
           @let choices5 =
             [
               { value: '', label: 'Select date format' },
-              { value: 'ymd', label: 'Year-month-day' },
+              { value: 'ymd', label: 'Year-month-day (YYYY-MM-DD or YYYYMMDD)' },
               { value: 'dmy', label: 'Day-month-year' },
               { value: 'mdy', label: 'Month-day-year' },
             ];
@@ -191,11 +191,11 @@
         <h2>3. Review and import</h2>
         <div class="summary">
           {{ data.counts.accepted }} ready ·
-          {{ data.counts.duplicate }} duplicate · {{ data.counts.review }} to
-          review · {{ data.counts.rejected }} rejected
+          {{ data.counts.duplicate }} duplicates skipped ·
+          {{ data.counts.rejected }} rejected
         </div>
         <p>
-          Preview totals · debits {{ data.debits | zar }} · credits
+          New transactions · debits {{ data.debits | zar }} · credits
           {{ data.credits | zar }} · net {{ data.net | zar }}
         </p>
         @if (data.reconciliation) {
@@ -217,82 +217,11 @@
             />
           </div>
         }
-        @if (data.review.length) {
-          <div class="actions">
-            <i-button
-              (clicked)="setReviews('skip')"
-              severity="secondary"
-              [outlined]="true"
-            >
-              Skip all possible overlaps
-            </i-button>
-            <i-button
-              (clicked)="setReviews('keep')"
-              severity="secondary"
-              [outlined]="true"
-            >
-              Keep all after review
-            </i-button>
-          </div>
-          <div class="stack review-table">
-            @for (
-              row of data.review.slice(reviewPage * 50, (reviewPage + 1) * 50);
-              track row.row
-            ) {
-              <i-card>
-                <div class="stack">
-                  <div>
-                    <strong>
-                      Row {{ row.row }} · {{ row.candidate?.description }}
-                    </strong>
-                    <p class="muted">
-                      {{ row.candidate?.date }} ·
-                      {{ row.candidate?.amount | zar }} · Balance
-                      {{ row.candidate?.balance | zar }} · Ref
-                      {{ row.candidate?.reference || '—' }}
-                    </p>
-                  </div>
-                  @for (match of row.matches; track $index) {
-                    <p>
-                      Ledger match · {{ match.date }} ·
-                      {{ match.description }} · {{ match.amount | zar }}
-                      <span class="muted">
-                        · Balance {{ match.balance | zar }} · Ref
-                        {{ match.reference || '—' }}
-                      </span>
-                    </p>
-                  }
-                  <i-select
-                    [label]="'Decision for row ' + row.row"
-                    [options]="overlapChoices"
-                    optionLabel="label"
-                    [fluid]="true"
-                    [ngModel]="selected(overlapChoices, decisions[row.row])"
-                    (ngModelChange)="decisions[row.row] = $event.value"
-                  />
-                </div>
-              </i-card>
-            }
-          </div>
-          <div class="actions">
-            <i-button
-              [disabled]="reviewPage === 0"
-              (clicked)="reviewPage = reviewPage - 1"
-              severity="secondary"
-              [outlined]="true"
-            >
-              Previous overlaps
-            </i-button>
-            <span>Overlap page {{ reviewPage + 1 }}</span>
-            <i-button
-              [disabled]="(reviewPage + 1) * 50 >= data.review.length"
-              (clicked)="reviewPage = reviewPage + 1"
-              severity="secondary"
-              [outlined]="true"
-            >
-              Next overlaps
-            </i-button>
-          </div>
+        @if (data.counts.duplicate) {
+          <i-message severity="info">
+            Repeated transactions and rows that match without enough information
+            to distinguish them are skipped. Import history records the reason.
+          </i-message>
         }
         <i-table
           [grid]="checksGrid(data)"
@@ -303,15 +232,11 @@
         />
         <div class="actions">
           <i-button
-            [disabled]="
-              ui.busy() ||
-              (!!data.counts.rejected && !acceptRejected) ||
-              !reviewed()
-            "
+            [disabled]="ui.busy() || (!!data.counts.rejected && !acceptRejected)"
             (clicked)="commit()"
             severity="primary"
           >
-            Import reviewed rows
+            Import new rows
           </i-button>
         </div>
       </div>
