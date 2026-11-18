@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": [] },
+  "angularCompilerOptions": { "strictTemplates": true, "strictInjectionParameters": true },
+  "files": ["src/app/renderer/main.ts"],
+  "include": []
+}

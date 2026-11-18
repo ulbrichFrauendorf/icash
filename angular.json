@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "cli": { "analytics": false, "cache": { "enabled": false } },
+  "projects": {
+    "icash": {
+      "projectType": "application",
+      "root": "",
+      "sourceRoot": "src",
+      "architect": {
+        "build": {
+          "builder": "@angular/build:application",
+          "options": {
+            "outputPath": "dist/renderer",
+            "browser": "src/app/renderer/main.ts",
+            "index": "src/app/renderer/index.html",
+            "tsConfig": "tsconfig.app.json",
+            "styles": ["src/app/renderer/styles.scss"],
+            "baseHref": "./",
+            "outputHashing": "all",
+            "extractLicenses": true
+          }
+        }
+      }
+    }
+  }
+}

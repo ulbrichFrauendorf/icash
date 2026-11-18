@@ -1,0 +1,61 @@
+{
+  "name": "icash",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Offline household budgeting for South Africa",
+  "author": "iCash contributors",
+  "productName": "iCash",
+  "main": "dist/desktop/main.cjs",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "build": "ng build && node scripts/build-desktop.mjs",
+    "dev": "npm run build && node scripts/run-electron.mjs",
+    "lint": "eslint src tests",
+    "typecheck": "tsc --noEmit && ngc --noEmit -p tsconfig.app.json",
+    "test": "vitest run",
+    "test:e2e": "npm run build && playwright test",
+    "make": "npm run build && electron-forge make"
+  },
+  "dependencies": {
+    "@angular/animations": "21.2.26",
+    "@angular/cdk": "21.2.14",
+    "@angular/common": "21.2.26",
+    "@angular/compiler": "21.2.26",
+    "@angular/core": "21.2.26",
+    "@angular/forms": "21.2.26",
+    "@angular/material": "21.2.14",
+    "@angular/platform-browser": "21.2.26",
+    "@angular/router": "21.2.26",
+    "better-sqlite3-multiple-ciphers": "13.2.0",
+    "chart.js": "4.6.1",
+    "csv-parse": "7.0.3",
+    "csv-stringify": "6.9.0",
+    "rxjs": "7.8.2",
+    "tslib": "2.9.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@angular/build": "21.2.30",
+    "@angular/cli": "21.2.30",
+    "@angular/compiler-cli": "21.2.26",
+    "@electron-forge/cli": "8.0.1",
+    "@electron-forge/maker-squirrel": "8.0.1",
+    "@electron-forge/maker-zip": "8.0.1",
+    "@electron-forge/plugin-auto-unpack-natives": "8.0.1",
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.65.1",
+    "@types/better-sqlite3": "9.6.0",
+    "@types/node": "24.19.2",
+    "electron": "42.11.18",
+    "esbuild": "0.28.2",
+    "eslint": "10.15.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.73.0",
+    "vitest": "4.1.12"
+  },
+  "config": {
+    "forge": "./forge.config.cjs"
+  }
+}
