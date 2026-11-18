@@ -1,0 +1,375 @@
+<div class="workspace-page">
+  <div class="page-heading">
+    <div>
+      <h1>Import statements</h1>
+      <p>Review an Absa CSV before adding it to your ledger.</p>
+    </div>
+  </div>
+  <i-card class="surface">
+    <div class="stack">
+      <h2>1. Choose a statement</h2>
+      <div class="actions">
+        @let choices1 =
+          [
+            { value: '', label: 'Select account' },
+            ...rowChoices(accounts(), 'id', 'name'),
+          ];
+        <i-select
+          label="Destination account"
+          [options]="choices1"
+          optionLabel="label"
+          [fluid]="true"
+          [ngModel]="selected(choices1, account)"
+          (ngModelChange)="account = $event.value; reset()"
+        />
+        <i-button
+          [disabled]="!account || ui.busy()"
+          (clicked)="choose()"
+          severity="primary"
+        >
+          Choose CSV
+        </i-button>
+        @if (!accounts().length) {
+          <i-button
+            (clicked)="ui.go('Accounts')"
+            severity="secondary"
+            [outlined]="true"
+          >
+            Add an account
+          </i-button>
+        }
+      </div>
+    </div>
+  </i-card>
+  @if (file; as current) {
+    <i-card class="surface">
+      <div class="stack">
+        <div class="section-header">
+          <h2>2. Map columns</h2>
+          <i-button
+            [disabled]="ui.busy()"
+            (clicked)="cancel()"
+            severity="secondary"
+            [outlined]="true"
+          >
+            Cancel import
+          </i-button>
+        </div>
+        <p class="muted">{{ current.fileName }}</p>
+        <div class="field-grid">
+          @let choices2 =
+            [
+              { value: ',', label: 'Comma' },
+              { value: ';', label: 'Semicolon' },
+              { value: '\t', label: 'Tab' },
+            ];
+          <i-select
+            label="Delimiter"
+            [options]="choices2"
+            optionLabel="label"
+            [fluid]="true"
+            [ngModel]="selected(choices2, delimiter)"
+            (ngModelChange)="delimiter = $event.value; invalidate()"
+          />
+          @let choices3 =
+            [
+              { value: 'utf-8', label: 'UTF-8' },
+              { value: 'windows-1252', label: 'Windows-1252' },
+              { value: 'utf-16le', label: 'UTF-16LE' },
+            ];
+          <i-select
+            label="Encoding"
+            [options]="choices3"
+            optionLabel="label"
+            [fluid]="true"
+            [ngModel]="selected(choices3, encoding)"
+            (ngModelChange)="encoding = $event.value; invalidate()"
+          />
+          <i-input-text
+            [id]="'import-header-record'"
+            label="Header record"
+            type="number"
+            [fluid]="true"
+            [ngModel]="header"
+            (ngModelChange)="header = +$event; invalidate()"
+          />
+          <i-button
+            [disabled]="ui.busy()"
+            (clicked)="decode()"
+            severity="secondary"
+            [outlined]="true"
+          >
+            Read columns
+          </i-button>
+        </div>
+        <i-table
+          [grid]="sourceGrid(current)"
+          size="small"
+          [scrollable]="true"
+        />
+        <div class="field-grid">
+          @let choices4 =
+            [
+              { value: 'signed', label: 'Signed amount' },
+              { value: 'separate', label: 'Separate debit and credit' },
+            ];
+          <i-select
+            label="Amount layout"
+            [options]="choices4"
+            optionLabel="label"
+            [fluid]="true"
+            [ngModel]="selected(choices4, layout)"
+            (ngModelChange)="layout = $event.value; invalidate()"
+          />
+          @let choices5 =
+            [
+              { value: '', label: 'Select date format' },
+              { value: 'ymd', label: 'Year-month-day' },
+              { value: 'dmy', label: 'Day-month-year' },
+              { value: 'mdy', label: 'Month-day-year' },
+            ];
+          <i-select
+            label="Date format"
+            [options]="choices5"
+            optionLabel="label"
+            [fluid]="true"
+            [ngModel]="selected(choices5, dateFormat)"
+            (ngModelChange)="dateFormat = $event.value; invalidate()"
+          />
+          @let choices6 =
+            [
+              { value: '', label: 'Select decimal separator' },
+              { value: '.', label: 'Period (123.45)' },
+              { value: ',', label: 'Comma (123,45)' },
+            ];
+          <i-select
+            label="Decimal separator"
+            [options]="choices6"
+            optionLabel="label"
+            [fluid]="true"
+            [ngModel]="selected(choices6, decimal)"
+            (ngModelChange)="decimal = $event.value; invalidate()"
+          />
+          <i-checkbox
+            label="Invert amount signs"
+            [(ngModel)]="invert"
+            (ngModelChange)="invalidate()"
+          />
+        </div>
+        <div class="field-grid">
+          @for (key of fields(); track key) {
+            @let choices7 =
+              [
+                { value: undefined, label: 'Unmapped' },
+                ...rowChoices(headers(), 'index', 'index'),
+              ];
+            <i-select
+              [label]="labels[key]"
+              [options]="choices7"
+              optionLabel="label"
+              [fluid]="true"
+              [ngModel]="selected(choices7, columns[key])"
+              (ngModelChange)="columns[key] = $event.value; invalidate()"
+            />
+          }
+        </div>
+        <div>
+          <i-button
+            [disabled]="!dateFormat || !decimal || ui.busy()"
+            (clicked)="validate()"
+            severity="primary"
+          >
+            Validate statement
+          </i-button>
+        </div>
+      </div>
+    </i-card>
+  }
+  @if (preview; as data) {
+    <i-card class="surface">
+      <div class="stack">
+        <h2>3. Review and import</h2>
+        <div class="summary">
+          {{ data.counts.accepted }} ready ·
+          {{ data.counts.duplicate }} duplicate · {{ data.counts.review }} to
+          review · {{ data.counts.rejected }} rejected
+        </div>
+        <p>
+          Preview totals · debits {{ data.debits | zar }} · credits
+          {{ data.credits | zar }} · net {{ data.net | zar }}
+        </p>
+        @if (data.reconciliation) {
+          <i-message severity="warning">{{ data.reconciliation }}</i-message>
+        }
+        @if (data.counts.rejected) {
+          <div class="actions">
+            <i-button
+              [disabled]="ui.busy()"
+              (clicked)="errors()"
+              severity="secondary"
+              [outlined]="true"
+            >
+              Export rejected rows
+            </i-button>
+            <i-checkbox
+              label="Continue with valid rows"
+              [(ngModel)]="acceptRejected"
+            />
+          </div>
+        }
+        @if (data.review.length) {
+          <div class="actions">
+            <i-button
+              (clicked)="setReviews('skip')"
+              severity="secondary"
+              [outlined]="true"
+            >
+              Skip all possible overlaps
+            </i-button>
+            <i-button
+              (clicked)="setReviews('keep')"
+              severity="secondary"
+              [outlined]="true"
+            >
+              Keep all after review
+            </i-button>
+          </div>
+          <div class="stack review-table">
+            @for (
+              row of data.review.slice(reviewPage * 50, (reviewPage + 1) * 50);
+              track row.row
+            ) {
+              <i-card>
+                <div class="stack">
+                  <div>
+                    <strong>
+                      Row {{ row.row }} · {{ row.candidate?.description }}
+                    </strong>
+                    <p class="muted">
+                      {{ row.candidate?.date }} ·
+                      {{ row.candidate?.amount | zar }} · Balance
+                      {{ row.candidate?.balance | zar }} · Ref
+                      {{ row.candidate?.reference || '—' }}
+                    </p>
+                  </div>
+                  @for (match of row.matches; track $index) {
+                    <p>
+                      Ledger match · {{ match.date }} ·
+                      {{ match.description }} · {{ match.amount | zar }}
+                      <span class="muted">
+                        · Balance {{ match.balance | zar }} · Ref
+                        {{ match.reference || '—' }}
+                      </span>
+                    </p>
+                  }
+                  <i-select
+                    [label]="'Decision for row ' + row.row"
+                    [options]="overlapChoices"
+                    optionLabel="label"
+                    [fluid]="true"
+                    [ngModel]="selected(overlapChoices, decisions[row.row])"
+                    (ngModelChange)="decisions[row.row] = $event.value"
+                  />
+                </div>
+              </i-card>
+            }
+          </div>
+          <div class="actions">
+            <i-button
+              [disabled]="reviewPage === 0"
+              (clicked)="reviewPage = reviewPage - 1"
+              severity="secondary"
+              [outlined]="true"
+            >
+              Previous overlaps
+            </i-button>
+            <span>Overlap page {{ reviewPage + 1 }}</span>
+            <i-button
+              [disabled]="(reviewPage + 1) * 50 >= data.review.length"
+              (clicked)="reviewPage = reviewPage + 1"
+              severity="secondary"
+              [outlined]="true"
+            >
+              Next overlaps
+            </i-button>
+          </div>
+        }
+        <i-table
+          [grid]="checksGrid(data)"
+          dataKey="row"
+          size="small"
+          [virtualScroll]="true"
+          height="20rem"
+        />
+        <div class="actions">
+          <i-button
+            [disabled]="
+              ui.busy() ||
+              (!!data.counts.rejected && !acceptRejected) ||
+              !reviewed()
+            "
+            (clicked)="commit()"
+            severity="primary"
+          >
+            Import reviewed rows
+          </i-button>
+        </div>
+      </div>
+    </i-card>
+  }
+  <i-card class="surface">
+    <div class="stack">
+      <h2>Import history</h2>
+      @if (!batches().length) {
+        <i-no-content message="Statements you import appear here." />
+      }
+      @for (batch of batches(); track batch.id) {
+        <div class="list-row">
+          <div>
+            <strong>{{ batch.file }}</strong>
+            <div class="muted">
+              {{ batch.account }} · {{ batch.createdAt.slice(0, 10) }} ·
+              {{ batch.inserted }} added · {{ batch.duplicate }} duplicates ·
+              {{ batch.rejected }} rejected
+            </div>
+          </div>
+          <i-button
+            [disabled]="ui.busy()"
+            (clicked)="showAudit(batch.id)"
+            severity="secondary"
+            [outlined]="true"
+          >
+            View rows
+          </i-button>
+        </div>
+      }
+      @if (auditBatch) {
+        <i-table
+          [grid]="auditGrid()"
+          dataKey="row"
+          size="small"
+          [virtualScroll]="true"
+          height="23rem"
+        />
+        <div class="actions">
+          <i-button
+            [disabled]="auditPage === 0 || ui.busy()"
+            (clicked)="showAudit(auditBatch, auditPage - 1)"
+            severity="secondary"
+            [outlined]="true"
+          >
+            Previous audit page
+          </i-button>
+          <i-button
+            [disabled]="audit().length < 100 || ui.busy()"
+            (clicked)="showAudit(auditBatch, auditPage + 1)"
+            severity="secondary"
+            [outlined]="true"
+          >
+            Next audit page
+          </i-button>
+        </div>
+      }
+    </div>
+  </i-card>
+</div>

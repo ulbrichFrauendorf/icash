@@ -6,7 +6,7 @@ export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['src/app/renderer/**/*.ts', 'src/features/**/ui/*.ts'],
+    files: ['src/app/renderer/**/*.ts', 'src/features/**/*.component.ts'],
     rules: {
       'no-restricted-imports': ['error', {
         patterns: ['node:*', 'electron', '**/platform/**', '**/main/**'],

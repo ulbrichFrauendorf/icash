@@ -1,6 +1,11 @@
 {
   "version": 1,
-  "cli": { "analytics": false, "cache": { "enabled": false } },
+  "cli": {
+    "analytics": false,
+    "cache": {
+      "enabled": false
+    }
+  },
   "projects": {
     "icash": {
       "projectType": "application",
@@ -14,10 +19,33 @@
             "browser": "src/app/renderer/main.ts",
             "index": "src/app/renderer/index.html",
             "tsConfig": "tsconfig.app.json",
-            "styles": ["src/app/renderer/styles.scss"],
+            "styles": [
+              "primeicons/primeicons.css",
+              "src/app/renderer/styles.scss"
+            ],
             "baseHref": "./",
             "outputHashing": "all",
-            "extractLicenses": true
+            "extractLicenses": true,
+            "assets": [
+              {
+                "glob": "**/*",
+                "input": "src/app/renderer/assets",
+                "output": "assets"
+              }
+            ],
+            "stylePreprocessorOptions": {
+              "includePaths": [
+                "node_modules"
+              ]
+            },
+            "optimization": {
+              "scripts": true,
+              "styles": {
+                "minify": true,
+                "inlineCritical": false
+              },
+              "fonts": false
+            }
           }
         }
       }

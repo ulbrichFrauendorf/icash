@@ -1,0 +1,192 @@
+<div class="workspace-page">
+  <div class="page-heading">
+    <div>
+      <h1>Monthly budgets</h1>
+      <p>Set spending limits and compare them with what you actually spent.</p>
+    </div>
+    <i-input-text
+      [id]="'budgets-budget-month'"
+      label="Budget month"
+      type="month"
+      [ngModel]="month"
+      (ngModelChange)="pick($event)"
+      [disabled]="ui.busy()"
+      [fluid]="true"
+      [forceFloated]="true"
+    />
+  </div>
+  @if (budget(); as data) {
+    <div class="metric-grid">
+      <i-card class="metric">
+        <div class="metric-content">
+          <span>
+            <i class="pi pi-wallet metric-icon" aria-hidden="true"></i>
+            Allocated
+          </span>
+          <strong>{{ data.allocated | zar }}</strong>
+        </div>
+      </i-card>
+      <i-card class="metric">
+        <div class="metric-content">
+          <span>
+            <i class="pi pi-refresh metric-icon" aria-hidden="true"></i>
+            Rollover
+          </span>
+          <strong>{{ data.rollover | zar }}</strong>
+        </div>
+      </i-card>
+      <i-card class="metric">
+        <div class="metric-content">
+          <span>
+            <i class="pi pi-arrow-up-right metric-icon" aria-hidden="true"></i>
+            Actual spending
+          </span>
+          <strong>{{ data.actual | zar }}</strong>
+        </div>
+      </i-card>
+      <i-card class="metric accent">
+        <div class="metric-content">
+          <span>
+            <i class="pi pi-calculator metric-icon" aria-hidden="true"></i>
+            Budget remaining
+          </span>
+          <strong data-testid="budget-remaining">
+            {{ data.remaining | zar }}
+          </strong>
+        </div>
+      </i-card>
+    </div>
+    <i-card class="surface">
+      <div class="stack">
+        <div class="section-header">
+          <h2>Category allocations</h2>
+          <div class="actions">
+            <i-button
+              [disabled]="data.closed || ui.busy()"
+              (clicked)="copy()"
+              severity="secondary"
+              [outlined]="true"
+            >
+              Copy previous month
+            </i-button>
+            <i-button
+              [disabled]="ui.busy()"
+              (clicked)="close(data)"
+              severity="secondary"
+              [outlined]="true"
+            >
+              {{ data.closed ? 'Reopen month' : 'Close month' }}
+            </i-button>
+          </div>
+        </div>
+        @if (data.closed) {
+          <i-tag
+            [value]="'Closed · revision ' + data.revision"
+            severity="info"
+          />
+        }
+        @if (data.changed) {
+          <i-message severity="warning">
+            The current ledger differs from this revision. Net change in
+            spending {{ data.delta | zar }}. Reopen the month to review.
+          </i-message>
+        }
+        <i-table
+          [grid]="allocations()"
+          dataKey="categoryId"
+          size="small"
+          [scrollable]="true"
+        />
+      </div>
+    </i-card>
+    @if (selected; as current) {
+      <i-card class="surface" id="allocation-editor">
+        <div class="stack">
+          <h2>Allocation for {{ current.name }}</h2>
+          <div class="field-grid">
+            <i-input-text
+              [id]="'budgets-budget-amount-r'"
+              label="Budget amount (R)"
+              [(ngModel)]="amount"
+              placeholder="Use a period for decimals"
+              [fluid]="true"
+            />
+            @let choices1 =
+              [
+                { value: 'once', label: 'This month' },
+                { value: 'monthly', label: 'From this month · monthly target' },
+                { value: 'weekly', label: 'From this month · weekly target' },
+                { value: 'annual', label: 'From this month · annual target' },
+              ];
+            <i-select
+              label="Apply to"
+              [options]="choices1"
+              optionLabel="label"
+              [fluid]="true"
+              [ngModel]="selectedChoice(choices1, cadence)"
+              (ngModelChange)="cadence = $event.value"
+            />
+            <i-checkbox
+              label="Carry unused funds to next month"
+              [(ngModel)]="rollover"
+            />
+          </div>
+          <p class="muted">
+            Leave the amount blank to remove the single-month override or stop a
+            future target.
+          </p>
+          <div class="actions">
+            <i-button
+              [disabled]="ui.busy()"
+              (clicked)="save()"
+              severity="primary"
+            >
+              Save allocation
+            </i-button>
+            <i-button
+              (clicked)="selected = null"
+              severity="secondary"
+              [outlined]="true"
+            >
+              Cancel
+            </i-button>
+          </div>
+        </div>
+      </i-card>
+    }
+    <i-card class="surface">
+      <div class="stack">
+        <h2>Suggested allocations</h2>
+        <p>
+          Recommendations use the median of up to six fully covered prior
+          months. Confirm missing coverage in Accounts.
+        </p>
+        <i-button
+          [disabled]="ui.busy()"
+          (clicked)="suggest()"
+          severity="secondary"
+          [outlined]="true"
+        >
+          Review suggestions
+        </i-button>
+        @if (recommendations(); as result) {
+          @if (!result.months.length) {
+            <i-no-content message="No complete prior months are available." />
+          } @else {
+            <p>
+              {{ result.months.join(', ')
+              }}{{ result.months.length < 3 ? ' · Limited history' : '' }}
+            </p>
+            <i-table
+              [grid]="suggestionGrid()"
+              dataKey="categoryId"
+              size="small"
+              [virtualScroll]="true"
+              height="24rem"
+            />
+          }
+        }
+      </div>
+    </i-card>
+  }
+</div>

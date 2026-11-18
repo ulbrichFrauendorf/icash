@@ -1,0 +1,271 @@
+<div class="workspace-page">
+  <div class="page-heading">
+    <div>
+      <h1>Categories</h1>
+      <p>Organize the income and spending that matter to your household.</p>
+    </div>
+    <i-button
+      (clicked)="draft = blank()"
+      severity="secondary"
+      [outlined]="true"
+    >
+      New category
+    </i-button>
+  </div>
+  <div class="split-grid">
+    <i-card class="surface">
+      <div class="stack">
+        <h2>Category structure</h2>
+        @if (!list().length) {
+          <i-no-content
+            message="Create a category or restore the household defaults."
+          />
+        }
+        @for (group of roots(); track group.id) {
+          <div class="category-group">
+            <div class="list-row">
+              <span>
+                <i class="swatch" [style.background]="group.colour"></i>
+                <strong>{{ group.icon }} {{ group.name }}</strong>
+                <small class="muted">
+                  · {{ group.kind }}{{ group.archived ? ' · archived' : '' }}
+                </small>
+              </span>
+              <i-button
+                (clicked)="edit(group)"
+                severity="secondary"
+                [outlined]="true"
+              >
+                Edit
+              </i-button>
+            </div>
+            @for (child of children(group.id); track child.id) {
+              <div class="list-row child">
+                <span>
+                  <i class="swatch" [style.background]="child.colour"></i>
+                  {{ child.icon }} {{ child.name
+                  }}{{ child.archived ? ' · archived' : '' }}
+                </span>
+                <i-button
+                  (clicked)="edit(child)"
+                  severity="secondary"
+                  [outlined]="true"
+                >
+                  Edit
+                </i-button>
+              </div>
+            }
+          </div>
+        }
+      </div>
+    </i-card>
+    <div class="stack">
+      <i-card class="surface">
+        <form class="stack" (ngSubmit)="save()">
+          <h2>{{ draft.id ? 'Edit category' : 'New category' }}</h2>
+          <i-input-text
+            [id]="'categories-category-name'"
+            label="Category name"
+            name="name"
+            [(ngModel)]="draft.name"
+            maxlength="80"
+            required
+            [fluid]="true"
+          />
+          <div class="field-grid">
+            @let choices1 =
+              [
+                { value: 'expense', label: 'Expense' },
+                { value: 'income', label: 'Income' },
+                { value: 'transfer', label: 'Transfer' },
+                { value: 'savings', label: 'Savings' },
+              ];
+            <i-select
+              label="Type"
+              name="kind"
+              [options]="choices1"
+              optionLabel="label"
+              [fluid]="true"
+              [ngModel]="selected(choices1, draft.kind)"
+              (ngModelChange)="draft.kind = $event.value"
+            />
+            @let choices2 =
+              [
+                { value: null, label: 'Top level' },
+                ...rowChoices(parents(), 'id', 'name'),
+              ];
+            <i-select
+              label="Parent"
+              name="parent"
+              [options]="choices2"
+              optionLabel="label"
+              [fluid]="true"
+              [ngModel]="selected(choices2, draft.parentId)"
+              (ngModelChange)="draft.parentId = $event.value"
+            />
+            <i-input-text
+              [id]="'categories-colour'"
+              label="Colour"
+              name="colour"
+              type="color"
+              [(ngModel)]="draft.colour"
+              [fluid]="true"
+              [forceFloated]="true"
+            />
+            <i-input-text
+              [id]="'categories-icon'"
+              label="Icon"
+              name="icon"
+              [(ngModel)]="draft.icon"
+              maxlength="24"
+              placeholder="Optional symbol"
+              [fluid]="true"
+            />
+            <i-input-text
+              [id]="'categories-display-order'"
+              label="Display order"
+              name="sort"
+              type="number"
+              [fluid]="true"
+              [ngModel]="draft.sort"
+              (ngModelChange)="draft.sort = +$event"
+            />
+          </div>
+          <i-checkbox
+            label="Exclude from spending reports"
+            name="excluded"
+            [(ngModel)]="draft.excludeReports"
+          />
+          @if (draft.id) {
+            <i-checkbox
+              label="Archive category"
+              name="archived"
+              [(ngModel)]="draft.archived"
+            />
+          }
+          <div class="actions">
+            <i-button
+              type="submit"
+              [disabled]="ui.busy() || !draft.name.trim()"
+              severity="primary"
+            >
+              Save category
+            </i-button>
+            @if (draft.id) {
+              <i-button
+                type="button"
+                (clicked)="draft = blank()"
+                severity="secondary"
+                [outlined]="true"
+              >
+                Cancel
+              </i-button>
+            }
+          </div>
+        </form>
+      </i-card>
+      <i-card class="surface">
+        <div class="stack">
+          <h2>Merge categories</h2>
+          @let choices3 =
+            [
+              { value: '', label: 'Select source' },
+              ...rowChoices(leaves(), 'id', categoryLabel),
+            ];
+          <i-select
+            label="Source category"
+            [options]="choices3"
+            optionLabel="label"
+            [fluid]="true"
+            [ngModel]="selected(choices3, from)"
+            (ngModelChange)="from = $event.value; usage.set(null)"
+          />
+          @let choices4 =
+            [
+              { value: '', label: 'Select destination' },
+              ...rowChoices(leaves(), 'id', categoryLabel),
+            ];
+          <i-select
+            label="Destination category"
+            [options]="choices4"
+            optionLabel="label"
+            [fluid]="true"
+            [ngModel]="selected(choices4, to)"
+            (ngModelChange)="to = $event.value; usage.set(null)"
+          />
+          <i-button
+            [disabled]="!from || !to || from === to || ui.busy()"
+            (clicked)="previewMerge()"
+            severity="secondary"
+            [outlined]="true"
+          >
+            Preview merge
+          </i-button>
+          @if (usage(); as counts) {
+            <p>
+              {{ counts['transactions'] }} transactions,
+              {{ counts['splits'] }} split lines, {{ counts['rules'] }} rules,
+              and
+              {{ (counts['allocations'] || 0) + (counts['defaults'] || 0) }}
+              budget entries will move. The source is archived.
+            </p>
+            <i-button
+              [disabled]="ui.busy()"
+              (clicked)="merge()"
+              severity="danger"
+            >
+              Confirm merge
+            </i-button>
+          }
+        </div>
+      </i-card>
+      <i-card class="surface">
+        <div class="stack">
+          <h2>Templates</h2>
+          <div class="actions">
+            <i-button
+              [disabled]="ui.busy()"
+              (clicked)="restore()"
+              severity="secondary"
+              [outlined]="true"
+            >
+              Restore missing defaults
+            </i-button>
+            <i-button
+              [disabled]="ui.busy()"
+              (clicked)="export()"
+              severity="secondary"
+              [outlined]="true"
+            >
+              Export template
+            </i-button>
+            <i-button
+              [disabled]="ui.busy()"
+              (clicked)="previewTemplate()"
+              severity="secondary"
+              [outlined]="true"
+            >
+              Choose template
+            </i-button>
+          </div>
+          @if (template(); as data) {
+            <p>
+              {{ data.categories }} categories and {{ data.rules }} rules ready
+              to add.
+            </p>
+            @for (conflict of data.conflicts; track $index) {
+              <p class="muted">{{ conflict }}</p>
+            }
+            <i-button
+              [disabled]="ui.busy()"
+              (clicked)="commitTemplate(data.token)"
+              severity="primary"
+            >
+              Import template
+            </i-button>
+          }
+        </div>
+      </i-card>
+    </div>
+  </div>
+</div>

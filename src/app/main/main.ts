@@ -31,7 +31,7 @@ if (testRoot || devRoot) {
 
 let window: BrowserWindow | null = null;
 let profiles: ProfileStore | undefined;
-const appUrl = 'icash://app/index.html';
+const appUrl = 'icash://app/';
 const renderer = resolve(__dirname, '../renderer/browser');
 
 const protect: KeyProtection = {
@@ -56,6 +56,7 @@ function showWindow() {
   window = new BrowserWindow({
     width: 1320, height: 860, minWidth: 730, minHeight: 550, title: 'iCash',
     backgroundColor: '#f3f6f3', autoHideMenuBar: true,
+    icon: join(renderer, "assets/branding/invensys-icon-light.png"),
     webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false },
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -75,10 +76,11 @@ if (app.requestSingleInstanceLock()) {
     });
     protocol.handle('icash', (request) => {
       const url = new URL(request.url);
-      if (url.hostname !== 'app' || !/^\/[a-z0-9._/-]+$/i.test(url.pathname) || url.pathname.includes('..')) {
+      const asset = url.pathname === '/' ? '/index.html' : url.pathname;
+      if (url.hostname !== 'app' || !/^\/[a-z0-9._/-]+$/i.test(asset) || asset.includes('..')) {
         return new Response('Not found', { status: 404 });
       }
-      return net.fetch(pathToFileURL(join(renderer, url.pathname)).href).then((response) => {
+      return net.fetch(pathToFileURL(join(renderer, asset)).href).then((response) => {
         const headers = new Headers(response.headers);
         headers.set('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'");
         headers.set('X-Content-Type-Options', 'nosniff');

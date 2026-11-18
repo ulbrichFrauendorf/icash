@@ -1,0 +1,407 @@
+<div class="workspace-page">
+  <div class="page-heading">
+    <div>
+      <h1>Transactions</h1>
+      <p>Search the ledger and review how each transaction contributes.</p>
+    </div>
+    <i-button
+      [disabled]="ui.busy()"
+      (clicked)="export()"
+      severity="secondary"
+      [outlined]="true"
+    >
+      Export results
+    </i-button>
+  </div>
+  <i-card class="surface">
+    <form class="stack" (ngSubmit)="search()">
+      <div class="field-grid">
+        <i-input-text
+          [id]="'transactions-search-transactions'"
+          label="Search transactions"
+          name="search"
+          [(ngModel)]="filter.text"
+          placeholder="Description, merchant, note or tag"
+          [fluid]="true"
+        />
+        @let choices1 =
+          [
+            { value: undefined, label: 'All accounts' },
+            ...rowChoices(accounts(), 'id', 'name'),
+          ];
+        <i-select
+          label="Account"
+          name="account"
+          [options]="choices1"
+          optionLabel="label"
+          [fluid]="true"
+          [ngModel]="selected(choices1, filter.accountId)"
+          (ngModelChange)="filter.accountId = $event.value"
+        />
+        @let choices2 =
+          [
+            { value: undefined, label: 'All categories' },
+            { value: null, label: 'Uncategorized' },
+            ...rowChoices(categories(), 'id', categoryLabel),
+          ];
+        <i-select
+          label="Category"
+          name="category"
+          [options]="choices2"
+          optionLabel="label"
+          [fluid]="true"
+          [ngModel]="selected(choices2, filter.categoryId)"
+          (ngModelChange)="filter.categoryId = $event.value"
+        />
+        @let choices3 =
+          [
+            { value: undefined, label: 'All' },
+            { value: 'expense', label: 'Expense' },
+            { value: 'income', label: 'Income' },
+            { value: 'transfer', label: 'Transfer' },
+          ];
+        <i-select
+          label="Treatment"
+          name="type"
+          [options]="choices3"
+          optionLabel="label"
+          [fluid]="true"
+          [ngModel]="selected(choices3, filter.type)"
+          (ngModelChange)="filter.type = $event.value"
+        />
+        <i-input-text
+          [id]="'transactions-from'"
+          label="From"
+          name="from"
+          type="date"
+          [(ngModel)]="filter.start"
+          [fluid]="true"
+          [forceFloated]="true"
+        />
+        <i-input-text
+          [id]="'transactions-to'"
+          label="To"
+          name="to"
+          type="date"
+          [(ngModel)]="filter.end"
+          [fluid]="true"
+          [forceFloated]="true"
+        />
+        <i-input-text
+          [id]="'transactions-merchant'"
+          label="Merchant"
+          name="merchant"
+          [(ngModel)]="filter.merchant"
+          [fluid]="true"
+        />
+        <i-input-text
+          [id]="'transactions-minimum-signed-amount-r'"
+          label="Minimum signed amount (R)"
+          name="minimum"
+          [(ngModel)]="min"
+          [fluid]="true"
+        />
+        <i-input-text
+          [id]="'transactions-maximum-signed-amount-r'"
+          label="Maximum signed amount (R)"
+          name="maximum"
+          [(ngModel)]="max"
+          [fluid]="true"
+        />
+        @let choices4 =
+          [
+            { value: 'newest', label: 'Newest first' },
+            { value: 'oldest', label: 'Oldest first' },
+            { value: 'amount', label: 'Amount ascending' },
+          ];
+        <i-select
+          label="Sort"
+          name="sort"
+          [options]="choices4"
+          optionLabel="label"
+          [fluid]="true"
+          [ngModel]="selected(choices4, filter.sort)"
+          (ngModelChange)="filter.sort = $event.value"
+        />
+      </div>
+      <div class="actions">
+        <i-button type="submit" [disabled]="ui.busy()" severity="primary">
+          Apply filters
+        </i-button>
+        <i-button
+          type="button"
+          [disabled]="ui.busy()"
+          (clicked)="clear()"
+          severity="secondary"
+          [outlined]="true"
+        >
+          Clear filters
+        </i-button>
+        @if (filter.scoped) {
+          <i-tag [value]="filter.scoped + ' contributors'" severity="info" />
+        }
+      </div>
+    </form>
+  </i-card>
+  <i-card class="surface">
+    <div class="stack">
+      <h2>
+        Ledger
+        <span class="muted">· {{ data().total }} results</span>
+      </h2>
+      @if (!data().total) {
+        <i-no-content
+          message="No transactions match. Import a statement or change your filters."
+        />
+      } @else {
+        <i-table
+          [grid]="ledger()"
+          dataKey="id"
+          size="small"
+          [virtualScroll]="true"
+          height="min(55vh, 34rem)"
+        />
+        <div class="actions">
+          <i-button
+            [disabled]="page === 0 || ui.busy()"
+            (clicked)="turn(page - 1)"
+            severity="secondary"
+            [outlined]="true"
+          >
+            Previous page
+          </i-button>
+          <span>Page {{ page + 1 }}</span>
+          <i-button
+            [disabled]="(page + 1) * data().size >= data().total || ui.busy()"
+            (clicked)="turn(page + 1)"
+            severity="secondary"
+            [outlined]="true"
+          >
+            Next page
+          </i-button>
+        </div>
+      }
+    </div>
+  </i-card>
+  @if (draft(); as row) {
+    <i-card class="surface" id="transaction-review">
+      <div class="stack">
+        <div class="section-header">
+          <div>
+            <h2>{{ row.description }}</h2>
+            <p>{{ row.date }} · {{ row.account }} · {{ row.amount | zar }}</p>
+          </div>
+          <i-button
+            (clicked)="draft.set(null)"
+            severity="secondary"
+            [outlined]="true"
+          >
+            Close review
+          </i-button>
+        </div>
+        <p class="muted">
+          Classification · {{ row.rule || row.classification }} · Bank reference
+          {{ row.reference || '—' }}
+        </p>
+        <div class="field-grid">
+          @let choices5 =
+            [
+              { value: 'expense', label: 'Expense / refund' },
+              { value: 'income', label: 'Income / reversal' },
+              { value: 'transfer', label: 'Internal transfer' },
+            ];
+          <i-select
+            label="Treatment"
+            [disabled]="!!row.pairId"
+            [options]="choices5"
+            optionLabel="label"
+            [fluid]="true"
+            [ngModel]="selected(choices5, row.treatment)"
+            (ngModelChange)="changeTreatment(row, $event.value)"
+          />
+          @let choices6 =
+            [
+              { value: null, label: 'Uncategorized' },
+              ...rowChoices(eligible(row), 'id', categoryLabel),
+            ];
+          <i-select
+            label="Transaction category"
+            [disabled]="!!row.pairId || !!splits.length"
+            [options]="choices6"
+            optionLabel="label"
+            [fluid]="true"
+            [ngModel]="selected(choices6, row.categoryId)"
+            (ngModelChange)="row.categoryId = $event.value"
+          />
+          <i-input-text
+            [id]="'transactions-merchant-name'"
+            label="Merchant name"
+            [(ngModel)]="row.merchant"
+            maxlength="120"
+            [fluid]="true"
+          />
+          <i-input-text
+            [id]="'transactions-tags'"
+            label="Tags"
+            [(ngModel)]="row.tags"
+            maxlength="300"
+            placeholder="Comma-separated"
+            [fluid]="true"
+          />
+        </div>
+        <i-textarea
+          [id]="'transactions-notes'"
+          label="Notes"
+          [(ngModel)]="row.notes"
+          [maxLength]="4000"
+          [fluid]="true"
+        />
+        <div class="actions">
+          <i-checkbox
+            label="Exclude from budgets"
+            [(ngModel)]="row.excludeBudget"
+          />
+          <i-checkbox
+            label="Exclude from reports"
+            [(ngModel)]="row.excludeReports"
+          />
+          @if (row.classification !== 'manual') {
+            <i-checkbox
+              label="Keep this classification during rule updates"
+              [(ngModel)]="confirmClassification"
+            />
+          }
+        </div>
+        @if (row.treatment !== 'transfer') {
+          <div class="stack">
+            <h3>Split amount</h3>
+            @for (line of splits; track $index) {
+              <div class="field-grid">
+                @let choices7 =
+                  [
+                    { value: '', label: 'Select category' },
+                    ...rowChoices(eligible(row), 'id', categoryLabel),
+                  ];
+                <i-select
+                  label="Split category"
+                  [options]="choices7"
+                  optionLabel="label"
+                  [fluid]="true"
+                  [ngModel]="selected(choices7, line.categoryId)"
+                  (ngModelChange)="line.categoryId = $event.value"
+                />
+                <i-input-text
+                  [id]="'transactions-signed-split-amount-r-' + $index"
+                  label="Signed split amount (R)"
+                  [(ngModel)]="line.amount"
+                  [fluid]="true"
+                />
+                <i-button
+                  (clicked)="splits.splice($index, 1)"
+                  severity="secondary"
+                  [outlined]="true"
+                >
+                  Remove split
+                </i-button>
+              </div>
+            }
+            <i-button
+              [disabled]="splits.length >= 30"
+              (clicked)="splits.push({ categoryId: '', amount: '' })"
+              severity="secondary"
+              [outlined]="true"
+            >
+              Add split line
+            </i-button>
+          </div>
+        }
+        <div class="actions">
+          <i-button
+            [disabled]="ui.busy()"
+            (clicked)="save(row)"
+            severity="primary"
+          >
+            Save transaction
+          </i-button>
+          <i-button
+            [disabled]="!row.categoryId || ui.busy()"
+            (clicked)="futureRule(row)"
+            severity="secondary"
+            [outlined]="true"
+          >
+            Create rule for future matches
+          </i-button>
+          <i-button
+            [disabled]="!row.categoryId || !row.merchant || ui.busy()"
+            (clicked)="merchant(row)"
+            severity="secondary"
+            [outlined]="true"
+          >
+            Remember merchant
+          </i-button>
+        </div>
+        <i-accordion header="Transfer matching">
+          @if (row.pairId) {
+            <p>
+              Both linked legs are excluded from household income and expenses.
+            </p>
+            <i-button
+              [disabled]="ui.busy()"
+              (clicked)="unlink(row)"
+              severity="secondary"
+              [outlined]="true"
+            >
+              Unlink transfer
+            </i-button>
+          } @else {
+            <p>
+              Review possible matches from your other accounts before pairing
+              them.
+            </p>
+            <div class="actions">
+              <i-input-text
+                [id]="'transactions-date-window-days'"
+                label="Date window (days)"
+                type="number"
+                [fluid]="true"
+                [ngModel]="days"
+                (ngModelChange)="days = +$event"
+              />
+              <i-button
+                [disabled]="ui.busy()"
+                (clicked)="findMatches(row.id)"
+                severity="secondary"
+                [outlined]="true"
+              >
+                Find transfer matches
+              </i-button>
+            </div>
+            @if (matches() !== null && !matches()?.length) {
+              <p>No equal-and-opposite movements found.</p>
+            }
+            @for (item of matches(); track item.id) {
+              <div class="list-row">
+                <span>
+                  {{ item.date }} · {{ item.account }} ·
+                  {{ item.description }} · {{ item.amount | zar }}
+                </span>
+                <i-button
+                  [disabled]="ui.busy()"
+                  (clicked)="pair(row.id, item.id)"
+                  severity="secondary"
+                  [outlined]="true"
+                >
+                  Confirm pair
+                </i-button>
+              </div>
+            }
+          }
+        </i-accordion>
+        <i-accordion header="Original statement row">
+          <p>Row {{ row.sourceRow }} · {{ row.original.join(' · ') }}</p>
+          <p>Statement balance {{ row.balance | zar }}</p>
+        </i-accordion>
+      </div>
+    </i-card>
+  }
+</div>

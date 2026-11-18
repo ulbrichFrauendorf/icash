@@ -16,30 +16,32 @@
     "typecheck": "tsc --noEmit && ngc --noEmit -p tsconfig.app.json",
     "test": "vitest run",
     "test:e2e": "npm run build && playwright test",
-    "make": "npm run build && electron-forge make"
+    "make": "npm run build && electron-forge make",
+    "postinstall": "node scripts/patch-build-dependencies.mjs"
   },
   "dependencies": {
-    "@angular/animations": "21.2.26",
-    "@angular/cdk": "21.2.14",
-    "@angular/common": "21.2.26",
-    "@angular/compiler": "21.2.26",
-    "@angular/core": "21.2.26",
-    "@angular/forms": "21.2.26",
-    "@angular/material": "21.2.14",
-    "@angular/platform-browser": "21.2.26",
-    "@angular/router": "21.2.26",
+    "@angular/animations": "22.2.6",
+    "@angular/cdk": "22.2.7",
+    "@angular/common": "22.2.6",
+    "@angular/compiler": "22.2.6",
+    "@angular/core": "22.2.6",
+    "@angular/forms": "22.2.6",
+    "@angular/platform-browser": "22.2.6",
+    "@angular/router": "22.2.6",
     "better-sqlite3-multiple-ciphers": "13.2.0",
     "chart.js": "4.6.1",
     "csv-parse": "7.0.3",
     "csv-stringify": "6.9.0",
+    "invensys-ng": "23.3.3",
+    "primeicons": "7.0.0",
     "rxjs": "7.8.2",
     "tslib": "2.9.1",
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@angular/build": "21.2.30",
-    "@angular/cli": "21.2.30",
-    "@angular/compiler-cli": "21.2.26",
+    "@angular/build": "22.2.7",
+    "@angular/cli": "22.2.7",
+    "@angular/compiler-cli": "22.2.6",
     "@electron-forge/cli": "8.0.1",
     "@electron-forge/maker-squirrel": "8.0.1",
     "@electron-forge/maker-zip": "8.0.1",
@@ -51,11 +53,16 @@
     "electron": "42.11.18",
     "esbuild": "0.28.2",
     "eslint": "10.15.0",
-    "typescript": "5.9.3",
+    "typescript": "6.0.3",
     "typescript-eslint": "8.73.0",
     "vitest": "4.1.12"
   },
   "config": {
     "forge": "./forge.config.cjs"
+  },
+  "overrides": {
+    "glob@>=9.0.0 <=14.0.1": "14.0.6",
+    "minimatch@>=7.0.0 <11.0.1": "11.0.9",
+    "picomatch": "4.0.7"
   }
 }

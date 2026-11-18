@@ -1,0 +1,48 @@
+@if (ui.profiles().active; as profile) {
+  <i-layout [config]="config" [menuModel]="menu">
+    <ng-container topbarActions>
+      <div class="topbar-context">
+        <i-tag [value]="profile.name" icon="pi pi-users" severity="contrast" />
+        <i-tag value="Offline · ZAR" icon="pi pi-lock" severity="success" />
+      </div>
+      <i-button
+        [icon]="profile.theme === 'dark' ? 'pi pi-sun' : 'pi pi-moon'"
+        [ariaLabel]="
+          profile.theme === 'dark' ? 'Use light theme' : 'Use dark theme'
+        "
+        [text]="true"
+        severity="contrast"
+        [disabled]="ui.busy()"
+        (clicked)="ui.setTheme(profile.theme === 'dark' ? 'light' : 'dark')"
+      />
+    </ng-container>
+  </i-layout>
+} @else {
+  <icash-profiles />
+}
+@if (ui.error() || ui.info()) {
+  <div class="app-feedback">
+    @if (ui.error(); as message) {
+      <i-message
+        severity="danger"
+        icon="pi pi-exclamation-circle"
+        [closable]="true"
+        (visibleChange)="ui.error.set('')"
+        role="alert"
+      >
+        {{ message }}
+      </i-message>
+    }
+    @if (ui.info(); as message) {
+      <i-message
+        severity="success"
+        icon="pi pi-check-circle"
+        [closable]="true"
+        (visibleChange)="ui.info.set('')"
+        role="status"
+      >
+        {{ message }}
+      </i-message>
+    }
+  </div>
+}

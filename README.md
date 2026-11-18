@@ -40,3 +40,9 @@ On Windows, open `%APPDATA%\iCash` to locate application data. Profiles under `p
 `src/features/` contains vertical slices with contracts, Electron handlers, domain logic, and standalone Angular components as needed. `src/app/` wires Electron, preload, and Angular together. `src/platform/main/` owns encrypted SQLite and migrations, and `src/shared/` owns the common finance and IPC contracts. New import sources can feed the same normalized transaction shape used by the CSV slice.
 
 Use synthetic statements only in `tests/fixtures/`. Store any real statements, backups, exports, and signing files outside the checkout or in the ignored local folders. Append database migrations so existing installations can upgrade.
+
+## Interface and dependencies
+
+The renderer uses `invensys-ng` for its layout, form controls, tabs, cards, tables, charts, and dialogs. Feature templates live in adjacent `*.component.html` files. The global stylesheet loads the library theme and sets iCash's light and dark tokens. The Invensys brand artwork comes from `invensys.integraflow`, and PrimeIcons are bundled with the installer. Library usage guidance is available from the [Invensys NG MCP endpoint](https://ng.invensys.web.za/mcp).
+
+`npm audit --omit=dev` checks the dependencies shipped to users. The full audit still reports [GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf) through the build toolchain because npm's registry has no fixed picomatch release. `postinstall` applies a version-checked mitigation to the pinned build dependency. It treats single-branch repeated wildcard patterns as literals. Remove the override and mitigation after upgrading to an upstream release that fixes the advisory.

@@ -1,0 +1,229 @@
+<div class="workspace-page">
+  <div class="page-heading">
+    <div>
+      <h1>Categorization rules</h1>
+      <p>Define how iCash classifies future transactions.</p>
+    </div>
+  </div>
+  <div class="split-grid">
+    <i-card class="surface">
+      <div class="stack">
+        <h2>Rules</h2>
+        <p class="muted">
+          User rules run before merchant mappings and defaults. Lower priority
+          numbers run first.
+        </p>
+        @for (rule of rules(); track rule.id) {
+          <div class="list-row">
+            <div>
+              <strong>{{ rule.name }}</strong>
+              <div class="muted">
+                {{ categoryName(rule.categoryId) }} · {{ rule.source }} ·
+                priority {{ rule.priority
+                }}{{ rule.enabled ? '' : ' · disabled' }}
+              </div>
+            </div>
+            <i-button
+              (clicked)="edit(rule)"
+              severity="secondary"
+              [outlined]="true"
+            >
+              Edit
+            </i-button>
+          </div>
+        } @empty {
+          <i-no-content
+            message="Create a rule to categorize a recurring merchant or payment."
+          />
+        }
+      </div>
+    </i-card>
+    <div class="stack">
+      <i-card class="surface">
+        <form class="stack" (ngSubmit)="save()">
+          <h2>{{ draft.id ? 'Edit rule' : 'New rule' }}</h2>
+          <i-input-text
+            [id]="'rules-rule-name'"
+            label="Rule name"
+            name="name"
+            [(ngModel)]="draft.name"
+            required
+            maxlength="80"
+            [fluid]="true"
+          />
+          @let choices1 =
+            [
+              { value: '', label: 'Select category' },
+              ...rowChoices(categories(), 'id', categoryLabel),
+            ];
+          <i-select
+            label="Target category"
+            name="category"
+            [options]="choices1"
+            optionLabel="label"
+            [fluid]="true"
+            [ngModel]="selected(choices1, draft.categoryId)"
+            (ngModelChange)="draft.categoryId = $event.value"
+          />
+          <div class="field-grid">
+            @let choices2 =
+              [
+                { value: 'description', label: 'Description' },
+                { value: 'merchant', label: 'Merchant' },
+              ];
+            <i-select
+              label="Field"
+              name="field"
+              [options]="choices2"
+              optionLabel="label"
+              [fluid]="true"
+              [ngModel]="selected(choices2, draft.field)"
+              (ngModelChange)="draft.field = $event.value"
+            />
+            @let choices3 =
+              [
+                { value: 'contains', label: 'Contains' },
+                { value: 'equals', label: 'Equals' },
+                { value: 'startsWith', label: 'Starts with' },
+              ];
+            <i-select
+              label="Operator"
+              name="operator"
+              [options]="choices3"
+              optionLabel="label"
+              [fluid]="true"
+              [ngModel]="selected(choices3, draft.operator)"
+              (ngModelChange)="draft.operator = $event.value"
+            />
+            <i-input-text
+              [id]="'rules-matching-text'"
+              label="Matching text"
+              name="text"
+              [(ngModel)]="draft.text"
+              maxlength="200"
+              [fluid]="true"
+            />
+            @let choices4 =
+              [
+                { value: '', label: 'Any' },
+                { value: 'debit', label: 'Debit' },
+                { value: 'credit', label: 'Credit' },
+              ];
+            <i-select
+              label="Direction"
+              name="direction"
+              [options]="choices4"
+              optionLabel="label"
+              [fluid]="true"
+              [ngModel]="selected(choices4, draft.direction)"
+              (ngModelChange)="draft.direction = $event.value"
+            />
+            @let choices5 =
+              [
+                { value: '', label: 'Any account' },
+                ...rowChoices(accounts(), 'id', 'name'),
+              ];
+            <i-select
+              label="Account"
+              name="account"
+              [options]="choices5"
+              optionLabel="label"
+              [fluid]="true"
+              [ngModel]="selected(choices5, draft.accountId)"
+              (ngModelChange)="draft.accountId = $event.value"
+            />
+            <i-input-text
+              [id]="'rules-minimum-r'"
+              label="Minimum (R)"
+              name="min"
+              [(ngModel)]="draft.minimum"
+              [fluid]="true"
+            />
+            <i-input-text
+              [id]="'rules-maximum-r'"
+              label="Maximum (R)"
+              name="max"
+              [(ngModel)]="draft.maximum"
+              [fluid]="true"
+            />
+            <i-input-text
+              [id]="'rules-priority'"
+              label="Priority"
+              name="priority"
+              type="number"
+              [fluid]="true"
+              [ngModel]="draft.priority"
+              (ngModelChange)="draft.priority = +$event"
+            />
+          </div>
+          <i-checkbox
+            label="Rule enabled"
+            name="enabled"
+            [(ngModel)]="draft.enabled"
+          />
+          <div class="actions">
+            <i-button
+              type="submit"
+              [disabled]="ui.busy() || !draft.name.trim() || !draft.categoryId"
+              severity="primary"
+            >
+              Save rule
+            </i-button>
+            @if (draft.id) {
+              <i-button
+                type="button"
+                (clicked)="reset()"
+                severity="secondary"
+                [outlined]="true"
+              >
+                Cancel
+              </i-button>
+              <i-button
+                type="button"
+                [disabled]="ui.busy()"
+                (clicked)="remove()"
+                severity="danger"
+              >
+                Delete rule
+              </i-button>
+            }
+          </div>
+        </form>
+      </i-card>
+      <i-card class="surface">
+        <div class="stack">
+          <h2>Apply to previous transactions</h2>
+          <i-button
+            [disabled]="ui.busy()"
+            (clicked)="previewRules()"
+            severity="secondary"
+            [outlined]="true"
+          >
+            Preview rule changes
+          </i-button>
+          @if (preview(); as result) {
+            <p>
+              {{ result.changes }} changed · {{ result.protected }} manual
+              assignments protected · {{ result.conflicts }} overlapping matches
+            </p>
+            <div class="review-table">
+              @for (row of result.sample; track row.id) {
+                <div class="list-row">
+                  {{ row.description }} · {{ categoryName(row.from) }} →
+                  {{ categoryName(row.to) }}
+                </div>
+              }
+            </div>
+            <i-button
+              [disabled]="ui.busy() || !result.changes"
+              (clicked)="applyRules(result)"
+              severity="primary"
+            >
+              Apply reviewed changes
+            </i-button>
+          }
+        </div>
+      </i-card>
+    </div>
+  </div>
+</div>

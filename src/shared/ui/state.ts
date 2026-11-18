@@ -1,16 +1,19 @@
-import { Injectable, signal } from '@angular/core';
+import { inject, Injectable, signal } from '@angular/core';
+import { Router } from '@angular/router';
+import { ConfirmationDialogService } from 'invensys-ng';
+import { screenPaths, type Screen } from './navigation';
 import type { Api, IpcResult } from '../api';
 import type { ProfileState } from '../../features/profiles/contract';
 import type { Filters } from '../../features/transactions/contract';
 import { decimalMoney, localDate, parseMoney } from '../finance';
 
-export type Screen = 'Overview' | 'Accounts' | 'Import' | 'Transactions' | 'Categories' | 'Rules' | 'Budgets' | 'Recurring' | 'Savings' | 'Reports' | 'Settings';
 type Bridge = Record<keyof Api, (input?: unknown) => Promise<IpcResult<unknown>>>;
 
 @Injectable({ providedIn: 'root' })
 export class Ui {
   readonly profiles = signal<ProfileState>({ profiles: [], active: null });
-  readonly screen = signal<Screen>('Overview');
+  private readonly router = inject(Router);
+  private readonly confirmation = inject(ConfirmationDialogService);
   readonly busy = signal(false);
   readonly error = signal('');
   readonly info = signal('');
@@ -30,15 +33,23 @@ export class Ui {
     this.error.set('');
     this.info.set('');
     if (screen === 'Transactions') this.transactionFilter.set(filters);
-    this.screen.set(screen);
+    void this.router.navigateByUrl('/' + screenPaths[screen]);
   }
 
-  state(state: ProfileState) {
+  state(state: ProfileState, returnToOverview = true) {
     if (this.profiles().active?.id !== state.active?.id) {
       this.transactionFilter.set({});
-      this.screen.set('Overview');
+      if (returnToOverview) void this.router.navigateByUrl('/overview');
     }
     this.profiles.set(state);
+  }
+
+  setTheme(theme: 'light' | 'dark') {
+    return this.run(async () => this.state(await this.api.setTheme({ theme })));
+  }
+
+  confirm(message: string, accept: () => void, severity: 'primary' | 'danger' = 'primary') {
+    return this.confirmation.confirm({ message, header: 'Confirm action', severity, accept });
   }
 
   async run(action: () => Promise<unknown>, message = '') {

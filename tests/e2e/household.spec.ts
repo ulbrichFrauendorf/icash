@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { _electron as electron, expect, test } from '@playwright/test';
+import { _electron as electron, expect, test, type Locator, type Page } from '@playwright/test';
 
 test('imports, corrects, budgets, restarts, and restores a household in Electron', async () => {
   const root = mkdtempSync(join(tmpdir(), 'icash-e2e-'));
@@ -14,7 +14,17 @@ test('imports, corrects, budgets, restarts, and restores a household in Electron
   let app = await start();
   try {
     let page = await app.firstWindow();
-    const nav = (name: string) => page.getByRole('navigation').getByRole('button', { name, exact: true }).click();
+    const nav = (name: string) => page.locator('i-menu').getByRole('link', { name: new RegExp(name + '$') }).click();
+    const choose = async (scope: Page | Locator, label: string, option: string) => {
+      await scope.getByRole('button', { name: new RegExp('^' + label + ':') }).click();
+      await page.getByRole('option', { name: option, exact: true }).click();
+    };
+    const expandGroceries = async () => {
+      const group = page.getByRole('row').filter({ has: page.getByRole('cell', { name: 'Groceries', exact: true }) });
+      await group.waitFor();
+      const expand = group.getByRole('button', { name: 'Expand details' });
+      if (await expand.count()) await expand.click();
+    };
     await page.getByLabel('Household name').fill('Synthetic household');
     await page.getByRole('button', { name: 'Create household' }).click();
     await page.getByLabel('Account name').fill('Absa current');
@@ -26,8 +36,8 @@ test('imports, corrects, budgets, restarts, and restores a household in Electron
     }, fixture);
     await nav('Import statements');
     await page.getByRole('button', { name: 'Choose CSV' }).click();
-    await page.getByLabel('Date format').selectOption('ymd');
-    await page.getByLabel('Decimal separator').selectOption('.');
+    await choose(page, 'Date format', 'Year-month-day');
+    await choose(page, 'Decimal separator', 'Period (123.45)');
     await page.getByRole('button', { name: 'Validate statement' }).click();
     await expect(page.getByText(/5 ready/)).toBeVisible();
     await page.getByRole('button', { name: 'Import reviewed rows' }).click();
@@ -36,21 +46,32 @@ test('imports, corrects, budgets, restarts, and restores a household in Electron
     await nav('Transactions');
     await page.getByRole('button', { name: 'Review Checkers refund' }).click();
     const review = page.locator('#transaction-review');
-    await review.getByLabel('Treatment', { exact: true }).selectOption('expense');
-    await review.getByLabel('Transaction category').selectOption({ label: 'Groceries / Supermarkets' });
+    await choose(review, 'Treatment', 'Expense / refund');
+    await choose(review, 'Transaction category', 'Groceries / Supermarkets');
     await page.getByRole('button', { name: 'Save transaction' }).click();
     await expect(page.getByText('Transaction saved.')).toBeVisible();
 
     await nav('Budgets');
     await page.getByLabel('Budget month').fill('2025-05');
+    await expandGroceries();
     await page.getByRole('button', { name: 'Edit allocation for Supermarkets' }).click();
     await page.getByLabel('Budget amount (R)').fill('2000.00');
     await page.getByRole('button', { name: 'Save allocation' }).click();
-    const supermarkets = () => page.getByRole('row').filter({ hasText: 'Supermarkets' });
+    const supermarkets = () => page.getByRole('row', { name: /^Supermarkets / });
+    await expandGroceries();
     await expect(supermarkets()).toContainText('420,00');
     await expect(supermarkets()).toContainText(/1\s?580,00/);
 
+    await page.getByRole('button', { name: 'Use dark theme' }).click();
+    await expect(page.locator('body')).toHaveClass('dark');
+    await expect(page.getByRole('img', { name: 'iCash logo' })).toHaveAttribute('src', /invensys-icon-dark/);
+
+    await nav('Overview');
+    await expect(page.getByTestId('income')).toContainText(/10\s?000,00/);
+    await expect(page.getByRole('img', { name: 'Bar chart of monthly income and spending' })).toBeVisible();
+
     await nav('Settings');
+    await page.getByRole('tab', { name: /Backup and recovery/ }).click();
     await app.evaluate(({ dialog }, destination) => {
       dialog.showSaveDialog = async () => ({ canceled: false, filePath: destination });
     }, backup);
@@ -61,11 +82,14 @@ test('imports, corrects, budgets, restarts, and restores a household in Electron
     app = await start();
     page = await app.firstWindow();
     await expect(page.getByText('Synthetic household')).toBeVisible();
+    await expect(page.locator('body')).toHaveClass('dark');
     await nav('Budgets');
     await page.getByLabel('Budget month').fill('2025-05');
+    await expandGroceries();
     await expect(supermarkets()).toContainText(/1\s?580,00/);
 
     await nav('Settings');
+    await page.getByRole('tab', { name: /Backup and recovery/ }).click();
     await app.evaluate(({ dialog }, selected) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selected] });
     }, backup);
@@ -73,6 +97,7 @@ test('imports, corrects, budgets, restarts, and restores a household in Electron
     await page.getByRole('button', { name: 'Restore as a new household' }).click();
     await expect(page.getByText('Backup restored as a new household.')).toBeVisible();
     await nav('Budgets');
+    await expandGroceries();
     await expect(supermarkets()).toContainText(/1\s?580,00/);
   } finally {
     await app.close();

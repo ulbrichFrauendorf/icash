@@ -1,0 +1,167 @@
+<div class="workspace-page">
+  <div class="page-heading">
+    <div>
+      <h1>Savings goals</h1>
+      <p>
+        Track contributions toward household goals, independently of spending.
+      </p>
+    </div>
+  </div>
+  <div class="split-grid">
+    <i-card class="surface">
+      <div class="stack">
+        <h2>Your goals</h2>
+        @for (goal of goals(); track goal.id) {
+          <section class="stack goal">
+            <div class="section-header">
+              <h3>{{ goal.name }}</h3>
+              <i-button
+                (clicked)="edit(goal)"
+                severity="secondary"
+                [outlined]="true"
+              >
+                Edit goal
+              </i-button>
+            </div>
+            <p>
+              {{ goal.progress | zar }} of {{ goal.target | zar
+              }}{{ goal.due ? ' · Due ' + goal.due : '' }}
+            </p>
+            <i-tag
+              [value]="progress(goal)"
+              severity="success"
+              icon="pi pi-flag"
+            />
+            @for (entry of goal.entries; track entry.id) {
+              <div class="list-row">
+                <span>
+                  {{ entry.date }} · {{ entry.amount | zar
+                  }}{{ entry.pairId ? ' · Paired transfer' : '' }}
+                </span>
+                <i-button
+                  [disabled]="ui.busy()"
+                  (clicked)="remove(entry.id)"
+                  severity="secondary"
+                  [outlined]="true"
+                >
+                  Remove
+                </i-button>
+              </div>
+            }
+          </section>
+        } @empty {
+          <i-no-content
+            message="Set a target for an emergency fund, holiday, or another goal."
+          />
+        }
+      </div>
+    </i-card>
+    <div class="stack">
+      <i-card class="surface">
+        <form class="stack" (ngSubmit)="save()">
+          <h2>{{ draft.id ? 'Edit goal' : 'New goal' }}</h2>
+          <i-input-text
+            [id]="'savings-goal-name'"
+            label="Goal name"
+            name="name"
+            [(ngModel)]="draft.name"
+            maxlength="80"
+            required
+            [fluid]="true"
+          />
+          <i-input-text
+            [id]="'savings-target-amount-r'"
+            label="Target amount (R)"
+            name="target"
+            [(ngModel)]="draft.target"
+            required
+            [fluid]="true"
+          />
+          <i-input-text
+            [id]="'savings-target-date'"
+            label="Target date"
+            name="date"
+            [(ngModel)]="draft.due"
+            type="date"
+            [fluid]="true"
+            [forceFloated]="true"
+          />
+          <div class="actions">
+            <i-button
+              type="submit"
+              [disabled]="ui.busy() || !draft.name.trim() || !draft.target"
+              severity="primary"
+            >
+              Save goal
+            </i-button>
+            @if (draft.id) {
+              <i-button
+                type="button"
+                (clicked)="reset()"
+                severity="secondary"
+                [outlined]="true"
+              >
+                Cancel
+              </i-button>
+            }
+          </div>
+        </form>
+      </i-card>
+      @if (goals().length) {
+        <i-card class="surface">
+          <div class="stack">
+            <h2>Record savings movement</h2>
+            @let choices1 =
+              [
+                { value: '', label: 'Select goal' },
+                ...rowChoices(goals(), 'id', 'name'),
+              ];
+            <i-select
+              label="Goal"
+              [options]="choices1"
+              optionLabel="label"
+              [fluid]="true"
+              [ngModel]="selected(choices1, goalId)"
+              (ngModelChange)="goalId = $event.value"
+            />
+            @let choices2 =
+              [
+                { value: '', label: 'Manual entry' },
+                ...rowChoices(transfers(), 'id', transferLabel),
+              ];
+            <i-select
+              label="Link a paired transfer"
+              [options]="choices2"
+              optionLabel="label"
+              [fluid]="true"
+              [ngModel]="selected(choices2, pairId)"
+              (ngModelChange)="pairId = $event.value; chooseTransfer(pairId)"
+            />
+            <i-input-text
+              [id]="'savings-signed-amount-r'"
+              label="Signed amount (R)"
+              [(ngModel)]="amount"
+              placeholder="Use a negative amount for a withdrawal"
+              [fluid]="true"
+            />
+            <i-input-text
+              [id]="'savings-entry-date'"
+              label="Entry date"
+              [(ngModel)]="date"
+              type="date"
+              [fluid]="true"
+              [forceFloated]="true"
+            />
+            <i-button
+              [disabled]="ui.busy() || !goalId || !amount || !date"
+              (clicked)="contribute()"
+              severity="primary"
+            >
+              Record movement
+            </i-button>
+          </div>
+        </i-card>
+      }
+    </div>
+  </div>
+</div>

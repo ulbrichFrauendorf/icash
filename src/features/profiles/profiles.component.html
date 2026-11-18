@@ -1,0 +1,71 @@
+<main class="welcome">
+  <i-card class="surface welcome-card">
+    <div class="stack">
+      <div class="welcome-brand">
+        <img src="assets/branding/invensys-icon-light.png" alt="Invensys" />
+        iCash
+      </div>
+      <h1>Your household finances, in one place.</h1>
+      <p>
+        Import bank statements, see where your money goes, and plan the month
+        ahead.
+      </p>
+      @if (ui.profiles().profiles.length) {
+        <h2>Open a household</h2>
+        <div class="stack">
+          @for (profile of ui.profiles().profiles; track profile.id) {
+            <i-button
+              [disabled]="ui.busy()"
+              (clicked)="open(profile.id)"
+              severity="secondary"
+              [outlined]="true"
+            >
+              {{ profile.name }}
+            </i-button>
+          }
+        </div>
+      }
+      <form (ngSubmit)="create()" class="stack">
+        <i-input-text
+          [id]="'profiles-household-name'"
+          label="Household name"
+          name="name"
+          [(ngModel)]="name"
+          required
+          maxlength="80"
+          placeholder="e.g. Our household"
+          [fluid]="true"
+        />
+        <i-checkbox
+          label="Add suggested household categories and rules"
+          name="seed"
+          [(ngModel)]="seed"
+        />
+        <i-button
+          type="submit"
+          [disabled]="!name.trim() || ui.busy()"
+          severity="primary"
+        >
+          Create household
+        </i-button>
+      </form>
+      <i-accordion header="Restore an encrypted backup">
+        <i-input-text
+          [id]="'profiles-backup-passphrase'"
+          label="Backup passphrase"
+          type="password"
+          [(ngModel)]="passphrase"
+          [fluid]="true"
+        />
+        <i-button
+          [disabled]="passphrase.length < 12 || ui.busy()"
+          (clicked)="restore()"
+          severity="secondary"
+          [outlined]="true"
+        >
+          Choose backup
+        </i-button>
+      </i-accordion>
+    </div>
+  </i-card>
+</main>

@@ -1,0 +1,118 @@
+<div class="workspace-page">
+  <div class="page-heading">
+    <div>
+      <h1>Recurring activity</h1>
+      <p>
+        Review subscriptions, bills, and regular income. Confirmed schedules
+        appear in forecasts.
+      </p>
+    </div>
+    <i-button (clicked)="newSchedule()" severity="secondary" [outlined]="true">
+      Add schedule
+    </i-button>
+  </div>
+  <div class="split-grid">
+    <i-card class="surface">
+      <div class="stack">
+        <h2>Schedules</h2>
+        @for (row of list(); track row.fingerprint) {
+          <div class="list-row">
+            <div>
+              <strong>{{ row.name }}</strong>
+              <div class="muted">
+                {{ row.amount | zar }} · {{ row.cadence }} · {{ row.next }} ·
+                {{ row.state }}
+              </div>
+            </div>
+            <i-button
+              (clicked)="edit(row)"
+              severity="secondary"
+              [outlined]="true"
+            >
+              Review
+            </i-button>
+          </div>
+        } @empty {
+          <i-no-content
+            message="iCash suggests schedules after three comparable weekly or monthly payments."
+          />
+        }
+      </div>
+    </i-card>
+    @if (draft; as row) {
+      <i-card class="surface">
+        <div class="stack">
+          <h2>{{ row.name || 'New schedule' }}</h2>
+          <i-input-text
+            [id]="'recurring-name'"
+            label="Name"
+            [(ngModel)]="row.name"
+            maxlength="80"
+            [fluid]="true"
+          />
+          <i-input-text
+            [id]="'recurring-signed-amount-r'"
+            label="Signed amount (R)"
+            [(ngModel)]="amount"
+            [fluid]="true"
+          />
+          @let choices1 =
+            [
+              { value: 'weekly', label: 'Weekly' },
+              { value: 'monthly', label: 'Monthly' },
+            ];
+          <i-select
+            label="Cadence"
+            [options]="choices1"
+            optionLabel="label"
+            [fluid]="true"
+            [ngModel]="selected(choices1, row.cadence)"
+            (ngModelChange)="row.cadence = $event.value"
+          />
+          <i-input-text
+            [id]="'recurring-next-expected-date'"
+            label="Next expected date"
+            type="date"
+            [(ngModel)]="row.next"
+            [fluid]="true"
+            [forceFloated]="true"
+          />
+          @if (row.evidence.length) {
+            <h3>Recent evidence</h3>
+          }
+          @for (item of row.evidence; track $index) {
+            <p>
+              {{ item.date }} · {{ item.description }} · {{ item.amount | zar }}
+            </p>
+          }
+          <div class="actions">
+            <i-button
+              [disabled]="!row.name.trim() || !amount || !row.next || ui.busy()"
+              (clicked)="save(row, 'confirmed')"
+              severity="primary"
+            >
+              Confirm schedule
+            </i-button>
+            @if (row.amount) {
+              <i-button
+                [disabled]="ui.busy()"
+                (clicked)="save(row, 'dismissed')"
+                severity="secondary"
+                [outlined]="true"
+              >
+                Dismiss
+              </i-button>
+            }
+            <i-button
+              (clicked)="draft = null"
+              severity="secondary"
+              [outlined]="true"
+            >
+              Cancel
+            </i-button>
+          </div>
+        </div>
+      </i-card>
+    }
+  </div>
+</div>

@@ -1,0 +1,139 @@
+<div class="workspace-page">
+  <div class="page-heading">
+    <div>
+      <h1>Settings</h1>
+      <p>Manage households, appearance, and encrypted backups.</p>
+    </div>
+  </div>
+  <i-tabs>
+    <i-tab-panel header="Households" icon="pi pi-users">
+      <div class="tab-content">
+        <i-card class="surface">
+          <div class="stack">
+            <h2>Households</h2>
+            @let choices1 =
+              [...rowChoices(ui.profiles().profiles, 'id', 'name')];
+            <i-select
+              label="Active household"
+              [disabled]="ui.busy()"
+              [options]="choices1"
+              optionLabel="label"
+              [fluid]="true"
+              [ngModel]="selected(choices1, ui.profiles().active?.id)"
+              (ngModelChange)="select($event.value)"
+            />
+            <i-input-text
+              [id]="'settings-new-household-name'"
+              label="New household name"
+              [(ngModel)]="name"
+              maxlength="80"
+              [fluid]="true"
+            />
+            <i-checkbox
+              label="Add suggested categories and rules"
+              [(ngModel)]="seed"
+            />
+            <i-button
+              [disabled]="!name.trim() || ui.busy()"
+              (clicked)="create()"
+              severity="primary"
+            >
+              Create household
+            </i-button>
+          </div>
+        </i-card>
+      </div>
+    </i-tab-panel>
+    <i-tab-panel header="Appearance" icon="pi pi-palette">
+      <div class="tab-content">
+        <i-card class="surface">
+          <div class="stack">
+            <h2>Appearance and locale</h2>
+            @let choices2 =
+              [
+                { value: 'light', label: 'Light' },
+                { value: 'dark', label: 'Dark' },
+              ];
+            <i-select
+              label="Theme"
+              [disabled]="ui.busy()"
+              [options]="choices2"
+              optionLabel="label"
+              [fluid]="true"
+              [ngModel]="selected(choices2, ui.profiles().active?.theme)"
+              (ngModelChange)="theme($event.value)"
+            />
+            <p class="muted">
+              South African rand (ZAR) · South African English
+            </p>
+          </div>
+        </i-card>
+      </div>
+    </i-tab-panel>
+    <i-tab-panel header="Backup and recovery" icon="pi pi-lock">
+      <div class="tab-content">
+        <i-card class="surface">
+          <div class="stack">
+            <h2>Encrypted backup</h2>
+            <p>
+              Your backup passphrase is required to restore the file on another
+              device. Use at least 12 characters.
+            </p>
+            <i-input-text
+              [id]="'settings-backup-passphrase'"
+              label="Backup passphrase"
+              type="password"
+              [(ngModel)]="passphrase"
+              [fluid]="true"
+            />
+            <div class="actions">
+              <i-button
+                [disabled]="passphrase.length < 12 || ui.busy()"
+                (clicked)="backup()"
+                severity="primary"
+              >
+                Export backup
+              </i-button>
+              <i-button
+                [disabled]="passphrase.length < 12 || ui.busy()"
+                (clicked)="restore()"
+                severity="secondary"
+                [outlined]="true"
+              >
+                Restore as a new household
+              </i-button>
+            </div>
+          </div>
+        </i-card>
+      </div>
+    </i-tab-panel>
+    <i-tab-panel header="Delete household" icon="pi pi-trash">
+      <div class="tab-content">
+        <i-card class="surface">
+          <div class="stack">
+            <h2>Delete household</h2>
+            <p>
+              Delete the selected household and its local ledger. Exported
+              backups remain wherever you saved them.
+            </p>
+            <i-input-text
+              [id]="'settings-delete-confirmation'"
+              label="Type {{ ui.profiles().active?.name }} to confirm"
+              [(ngModel)]="confirmation"
+              [fluid]="true"
+            />
+            <i-button
+              [disabled]="
+                confirmation !== ui.profiles().active?.name || ui.busy()
+              "
+              (clicked)="remove()"
+              severity="danger"
+            >
+              Delete household
+            </i-button>
+          </div>
+        </i-card>
+      </div>
+    </i-tab-panel>
+  </i-tabs>
+</div>

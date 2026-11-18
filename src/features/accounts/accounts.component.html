@@ -1,0 +1,146 @@
+<div class="workspace-page">
+  <div class="page-heading">
+    <div>
+      <h1>Accounts</h1>
+      <p>Set up the bank accounts and cards in this household.</p>
+    </div>
+    <i-button (clicked)="ui.go('Import')" severity="primary">
+      Import statement
+    </i-button>
+  </div>
+  <div class="split-grid">
+    <i-card class="surface">
+      <div class="stack">
+        <h2>Household accounts</h2>
+        @if (!accounts().length) {
+          <i-no-content
+            message="Add an account to choose where to import your first statement."
+          />
+        }
+        @for (account of accounts(); track account.id) {
+          <div class="list-row">
+            <div>
+              <strong>{{ account.name }}</strong>
+              <div class="muted">
+                {{ account.kind }}{{ account.archived ? ' · Archived' : '' }}
+              </div>
+            </div>
+            <i-button
+              (clicked)="edit(account)"
+              severity="secondary"
+              [outlined]="true"
+            >
+              Edit
+            </i-button>
+          </div>
+        }
+      </div>
+    </i-card>
+    <i-card class="surface">
+      <form class="stack" (ngSubmit)="save()">
+        <h2>{{ draft.id ? 'Edit account' : 'Add account' }}</h2>
+        <i-input-text
+          [id]="'accounts-account-name'"
+          label="Account name"
+          name="name"
+          [(ngModel)]="draft.name"
+          maxlength="80"
+          required
+          placeholder="e.g. Absa current account"
+          [fluid]="true"
+        />
+        @let choices1 =
+          [
+            { value: 'current', label: 'Current' },
+            { value: 'savings', label: 'Savings' },
+            { value: 'credit-card', label: 'Credit card' },
+            { value: 'other', label: 'Other' },
+          ];
+        <i-select
+          label="Account type"
+          name="kind"
+          [options]="choices1"
+          optionLabel="label"
+          [fluid]="true"
+          [ngModel]="selected(choices1, draft.kind)"
+          (ngModelChange)="draft.kind = $event.value"
+        />
+        @if (draft.id) {
+          <i-checkbox
+            label="Archive account"
+            name="archived"
+            [(ngModel)]="draft.archived"
+          />
+        }
+        <div class="actions">
+          <i-button
+            type="submit"
+            [disabled]="!draft.name.trim() || ui.busy()"
+            severity="primary"
+          >
+            Save account
+          </i-button>
+          @if (draft.id) {
+            <i-button
+              type="button"
+              (clicked)="reset()"
+              severity="secondary"
+              [outlined]="true"
+            >
+              Cancel
+            </i-button>
+          }
+        </div>
+      </form>
+    </i-card>
+    <i-card class="surface">
+      <div class="stack">
+        <h2>Confirm statement coverage</h2>
+        <p>
+          Confirm a date range once all activity for that account is present,
+          including dates with no transactions. iCash uses verified coverage
+          when suggesting budgets.
+        </p>
+        @let choices2 =
+          [
+            { value: '', label: 'Select account' },
+            ...rowChoices(accounts(), 'id', 'name'),
+          ];
+        <i-select
+          label="Coverage account"
+          [options]="choices2"
+          optionLabel="label"
+          [fluid]="true"
+          [ngModel]="selected(choices2, coverageAccount)"
+          (ngModelChange)="coverageAccount = $event.value"
+        />
+        <div class="field-grid">
+          <i-input-text
+            [id]="'accounts-coverage-starts'"
+            label="Coverage starts"
+            type="date"
+            [(ngModel)]="start"
+            [fluid]="true"
+            [forceFloated]="true"
+          />
+          <i-input-text
+            [id]="'accounts-coverage-ends'"
+            label="Coverage ends"
+            type="date"
+            [(ngModel)]="end"
+            [fluid]="true"
+            [forceFloated]="true"
+          />
+        </div>
+        <i-button
+          [disabled]="!coverageAccount || !start || !end || ui.busy()"
+          (clicked)="confirm()"
+          severity="secondary"
+          [outlined]="true"
+        >
+          Confirm coverage
+        </i-button>
+      </div>
+    </i-card>
+  </div>
+</div>
