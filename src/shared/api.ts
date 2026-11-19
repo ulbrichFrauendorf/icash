@@ -3,14 +3,14 @@ import type { Account, coverageInput, saveAccountInput } from '../features/accou
 import type { Category, mergeInput, saveCategoryInput } from '../features/categories/contract';
 import type { TemplatePreview } from '../features/categories/portable';
 import type { merchantInput, Rule, RulePreview, saveRuleInput } from '../features/categorization/contract';
-import type { AuditRow, Batch, commitInput, decodeInput, FilePreview, ImportPreview, ImportReviewPage, ImportResult, importReviewInput, previewInput, selectImportInput } from '../features/import-statement/contract';
+import type { AuditRow, Batch, commitInput, decodeInput, FilePreview, ImportPreview, ImportResult, previewInput, selectImportInput } from '../features/import-statement/contract';
 import type { allocationInput, Budget, closeInput, copyInput, defaultInput, Recommendations } from '../features/monthly-budget/contract';
 import type { AiClassification, AiRules, AiStatus, applyAiRulesInput, openAiKeyInput } from '../features/openai/contract';
-import type { createProfileInput, ProfileState, selectThemeInput } from '../features/profiles/contract';
+import type { createProfileInput, payDayInput, ProfileState, selectThemeInput } from '../features/profiles/contract';
 import type { Schedule, scheduleInput } from '../features/recurring/contract';
 import type { Report, reportInput } from '../features/reports/contract';
 import type { entryInput, Goal, goalInput } from '../features/savings-goals/contract';
-import type { EditTransaction, Filters, TransactionDetail, TransactionPage } from '../features/transactions/contract';
+import type { EditTransaction, Filters, Transaction, TransactionDetail, exportTransactionsInput } from '../features/transactions/contract';
 import type { candidateInput, pairInput, TransferCandidate } from '../features/transfers/contract';
 
 type Data<T extends z.ZodType> = z.input<T>;
@@ -30,6 +30,7 @@ export interface Requests {
   suggestAiRules: [undefined, AiRules];
   applyAiRules: [Data<typeof applyAiRulesInput>, { rules: Rule[]; created: number; classified: number }];
   setTheme: [Data<typeof selectThemeInput>, ProfileState];
+  setPayDay: [Data<typeof payDayInput>, ProfileState];
   accounts: [undefined, Account[]];
   saveAccount: [Data<typeof saveAccountInput>, Account[]];
   confirmCoverage: [Data<typeof coverageInput>, void];
@@ -44,13 +45,12 @@ export interface Requests {
   selectImport: [Data<typeof selectImportInput>, FilePreview];
   decodeImport: [Data<typeof decodeInput>, FilePreview];
   previewImport: [Data<typeof previewInput>, ImportPreview];
-  importReviewPage: [Data<typeof importReviewInput>, ImportReviewPage];
   commitImport: [Data<typeof commitInput>, ImportResult];
   cancelImport: [ID, void];
   exportErrors: [ID, boolean];
   batches: [undefined, Batch[]];
-  audit: [{ id: string; page: number }, AuditRow[]];
-  transactions: [Filters, TransactionPage];
+  audit: [ID, AuditRow[]];
+  transactions: [Filters, Transaction[]];
   transaction: [ID, TransactionDetail];
   saveTransaction: [EditTransaction, TransactionDetail];
   rules: [undefined, Rule[]];
@@ -77,7 +77,7 @@ export interface Requests {
   saveSchedule: [Data<typeof scheduleInput>, Schedule[]];
   report: [Data<typeof reportInput>, Report];
   exportReport: [Data<typeof reportInput>, boolean];
-  exportTransactions: [Filters, boolean];
+  exportTransactions: [Data<typeof exportTransactionsInput>, boolean];
   exportBackup: [{ passphrase: string }, boolean];
   restoreBackup: [{ passphrase: string }, ProfileState | null];
 }
@@ -91,11 +91,11 @@ export const channels: { [K in keyof Requests]: K } = {
   getProfiles: 'getProfiles', createProfile: 'createProfile', selectProfile: 'selectProfile', deleteProfile: 'deleteProfile',
   openAiStatus: 'openAiStatus', connectOpenAi: 'connectOpenAi', disconnectOpenAi: 'disconnectOpenAi',
   suggestAiCategory: 'suggestAiCategory', applyAiCategory: 'applyAiCategory', suggestAiRules: 'suggestAiRules', applyAiRules: 'applyAiRules',
-  setTheme: 'setTheme', accounts: 'accounts', saveAccount: 'saveAccount', confirmCoverage: 'confirmCoverage',
+  setTheme: 'setTheme', setPayDay: 'setPayDay', accounts: 'accounts', saveAccount: 'saveAccount', confirmCoverage: 'confirmCoverage',
   categories: 'categories', saveCategory: 'saveCategory', categoryUsage: 'categoryUsage',
   mergeCategories: 'mergeCategories', restoreDefaults: 'restoreDefaults', exportTemplate: 'exportTemplate',
   previewTemplate: 'previewTemplate', commitTemplate: 'commitTemplate', selectImport: 'selectImport',
-  importReviewPage: 'importReviewPage', decodeImport: 'decodeImport', previewImport: 'previewImport', commitImport: 'commitImport', cancelImport: 'cancelImport', exportErrors: 'exportErrors',
+  decodeImport: 'decodeImport', previewImport: 'previewImport', commitImport: 'commitImport', cancelImport: 'cancelImport', exportErrors: 'exportErrors',
   batches: 'batches', audit: 'audit', transactions: 'transactions', transaction: 'transaction',
   saveTransaction: 'saveTransaction', rules: 'rules', saveRule: 'saveRule', deleteRule: 'deleteRule',
   saveMerchant: 'saveMerchant', previewRules: 'previewRules', applyRules: 'applyRules',

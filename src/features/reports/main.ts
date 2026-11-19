@@ -1,12 +1,13 @@
 import { stringify } from 'csv-stringify/sync';
 import type { z } from 'zod';
 import type { Db } from '../../platform/main/database';
-import { cents, decimalMoney, median, monthEnd, shiftMonth } from '../../shared/finance';
+import { cents, decimalMoney, median, shiftMonth } from '../../shared/finance';
 import { ledgerLines } from '../../shared/ledger';
 import { accounts } from '../accounts/main';
 import { categories } from '../categories/main';
-import { fullyCovered } from '../monthly-budget/domain';
+import { budgetMonth, budgetPeriod, fullyCovered } from '../monthly-budget/domain';
 import { getBudget } from '../monthly-budget/main';
+import { householdPayDay } from '../profiles/main';
 import { nextOccurrence, occurrencesInPeriod } from '../recurring/domain';
 import { schedules } from '../recurring/main';
 import { goals } from '../savings-goals/main';
@@ -14,6 +15,7 @@ import type { Comparison, Report, reportInput } from './contract';
 
 export function report(db: Db, input: z.infer<typeof reportInput>): Report {
   const { month, accountId, period } = input;
+  const payDay = householdPayDay(db);
   const year = month.slice(0, 4);
   const firstMonth = period === 'year' ? year + '-01' : month;
   const lastMonth = period === 'year' ? year + '-12' : month;
@@ -21,8 +23,8 @@ export function report(db: Db, input: z.infer<typeof reportInput>): Report {
   const priorLast = shiftMonth(firstMonth, -1);
   const trendFirst = shiftMonth(lastMonth, -11);
   const first = [priorFirst, trendFirst, shiftMonth(firstMonth, -6)].sort()[0] ?? firstMonth;
-  const start = firstMonth + '-01';
-  const end = monthEnd(lastMonth);
+  const start = budgetPeriod(firstMonth, payDay).start;
+  const end = budgetPeriod(lastMonth, payDay).end;
   const list = categories(db);
   const byCategory = new Map(list.map((row) => [row.id, row]));
   const months = new Map<string, Comparison>();
@@ -31,9 +33,9 @@ export function report(db: Db, input: z.infer<typeof reportInput>): Report {
   const active = accountId ? accounts(db).filter((account) => account.id === accountId) : accounts(db).filter((account) => !account.archived);
   const coverage = db.prepare('SELECT account_id AS accountId,start,end FROM coverage').all() as { accountId: string; start: string; end: string }[];
   const covered = (month: string) => active.length > 0 && active.every((account) =>
-    fullyCovered(month, coverage.filter((row) => row.accountId === account.id)));
-  for (const line of ledgerLines(db, { start: first + '-01', end, accountId }, 'report')) {
-    const month = line.date.slice(0, 7);
+    fullyCovered(month, coverage.filter((row) => row.accountId === account.id), payDay));
+  for (const line of ledgerLines(db, { start: budgetPeriod(first, payDay).start, end, accountId }, 'report')) {
+    const month = budgetMonth(line.date, payDay);
     const summary = months.get(month) ?? { month, income: 0, expense: 0, net: 0 };
     if (line.treatment === 'income') summary.income = cents(summary.income + line.amount);
     else {
@@ -75,9 +77,9 @@ export function report(db: Db, input: z.infer<typeof reportInput>): Report {
     const latest = row.evidence.at(-1)?.date;
     if (latest && latest >= next) next = nextOccurrence(latest, row.cadence);
     const amount = cents(-row.amount * occurrencesInPeriod(next, row.cadence, start, end));
-    return amount ? [{ name: row.name, amount }] : [];
+    return amount ? [{ id: row.fingerprint, name: row.name, amount }] : [];
   }).sort((a, b) => b.amount - a.amount);
-  const savings = goals(db).map(({ name, progress, target }) => ({ name, progress, target }));
+  const savings = goals(db).map(({ id, name, progress, target }) => ({ id, name, progress, target }));
   const commitments = recurring.reduce((sum, row) => cents(sum + row.amount), 0);
   return {
     ...totals, month, start, end, period, covered: scope.every(covered), uncategorized: uncategorized.size,

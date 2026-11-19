@@ -1,188 +1,39 @@
-<div class="workspace-page">
-  <div class="page-heading">
-    <div>
-      <h1>Transactions</h1>
-      <p>Search the ledger and review how each transaction contributes.</p>
-    </div>
-    <i-button
-      [disabled]="ui.busy()"
-      (clicked)="export()"
-      severity="secondary"
-      [outlined]="true"
-    >
+<i-page-layout class="workspace-page" headerText="Transactions">
+  <div iPageHeaderActions class="actions">
+    <i-button [disabled]="ui.busy() || loading() || !data().length" (clicked)="exportResults()" severity="secondary" [outlined]="true">
       Export results
     </i-button>
   </div>
-  <i-card class="surface">
-    <form class="stack" (ngSubmit)="search()">
-      <div class="field-grid">
-        <i-input-text
-          [id]="'transactions-search-transactions'"
-          label="Search transactions"
-          name="search"
-          [(ngModel)]="filter.text"
-          placeholder="Description, merchant, note or tag"
-          [fluid]="true"
-        />
-        @let choices1 =
-          [
-            { value: undefined, label: 'All accounts' },
-            ...rowChoices(accounts(), 'id', 'name'),
-          ];
-        <i-select
-          label="Account"
-          name="account"
-          [options]="choices1"
-          optionLabel="label"
-          [fluid]="true"
-          [ngModel]="selected(choices1, filter.accountId)"
-          (ngModelChange)="filter.accountId = $event.value"
-        />
-        @let choices2 =
-          [
-            { value: undefined, label: 'All categories' },
-            { value: null, label: 'Uncategorized' },
-            ...rowChoices(categories(), 'id', categoryLabel),
-          ];
-        <i-select
-          label="Category"
-          name="category"
-          [options]="choices2"
-          optionLabel="label"
-          [fluid]="true"
-          [ngModel]="selected(choices2, filter.categoryId)"
-          (ngModelChange)="filter.categoryId = $event.value"
-        />
-        @let choices3 =
-          [
-            { value: undefined, label: 'All' },
-            { value: 'expense', label: 'Expense' },
-            { value: 'income', label: 'Income' },
-            { value: 'transfer', label: 'Transfer' },
-          ];
-        <i-select
-          label="Treatment"
-          name="type"
-          [options]="choices3"
-          optionLabel="label"
-          [fluid]="true"
-          [ngModel]="selected(choices3, filter.type)"
-          (ngModelChange)="filter.type = $event.value"
-        />
-        <i-input-text
-          [id]="'transactions-from'"
-          label="From"
-          name="from"
-          type="date"
-          [(ngModel)]="filter.start"
-          [fluid]="true"
-          [forceFloated]="true"
-        />
-        <i-input-text
-          [id]="'transactions-to'"
-          label="To"
-          name="to"
-          type="date"
-          [(ngModel)]="filter.end"
-          [fluid]="true"
-          [forceFloated]="true"
-        />
-        <i-input-text
-          [id]="'transactions-merchant'"
-          label="Merchant"
-          name="merchant"
-          [(ngModel)]="filter.merchant"
-          [fluid]="true"
-        />
-        <i-input-text
-          [id]="'transactions-minimum-signed-amount-r'"
-          label="Minimum signed amount (R)"
-          name="minimum"
-          [(ngModel)]="min"
-          [fluid]="true"
-        />
-        <i-input-text
-          [id]="'transactions-maximum-signed-amount-r'"
-          label="Maximum signed amount (R)"
-          name="maximum"
-          [(ngModel)]="max"
-          [fluid]="true"
-        />
-        @let choices4 =
-          [
-            { value: 'newest', label: 'Newest first' },
-            { value: 'oldest', label: 'Oldest first' },
-            { value: 'amount', label: 'Amount ascending' },
-          ];
-        <i-select
-          label="Sort"
-          name="sort"
-          [options]="choices4"
-          optionLabel="label"
-          [fluid]="true"
-          [ngModel]="selected(choices4, filter.sort)"
-          (ngModelChange)="filter.sort = $event.value"
-        />
-      </div>
-      <div class="actions">
-        <i-button type="submit" [disabled]="ui.busy()" severity="primary">
-          Apply filters
-        </i-button>
-        <i-button
-          type="button"
-          [disabled]="ui.busy()"
-          (clicked)="clear()"
-          severity="secondary"
-          [outlined]="true"
-        >
-          Clear filters
-        </i-button>
-        @if (filter.scoped) {
-          <i-tag [value]="filter.scoped + ' contributors'" severity="info" />
-        }
-      </div>
-    </form>
-  </i-card>
-  <i-card class="surface">
-    <div class="stack">
-      <h2>
-        Ledger
-        <span class="muted">· {{ data().total }} results</span>
-      </h2>
-      @if (!data().total) {
-        <i-no-content
-          message="No transactions match. Import a statement or change your filters."
-        />
-      } @else {
-        <i-table
-          [grid]="ledger()"
-          dataKey="id"
-          size="small"
-          [virtualScroll]="true"
-          height="min(55vh, 34rem)"
-        />
+  <div class="page-main">
+    @if (scope(); as current) {
+      @if (current.scoped) {
         <div class="actions">
-          <i-button
-            [disabled]="page === 0 || ui.busy()"
-            (clicked)="turn(page - 1)"
-            severity="secondary"
-            [outlined]="true"
-          >
-            Previous page
-          </i-button>
-          <span>Page {{ page + 1 }}</span>
-          <i-button
-            [disabled]="(page + 1) * data().size >= data().total || ui.busy()"
-            (clicked)="turn(page + 1)"
-            severity="secondary"
-            [outlined]="true"
-          >
-            Next page
-          </i-button>
+          <i-tag [value]="current.scoped === 'budget' ? 'Budget contributors' : 'Report contributors'" severity="info" />
+          <span>{{ current.start }} to {{ current.end }}</span>
+          <i-button (clicked)="ui.go('Transactions')" severity="secondary" [text]="true">Show all transactions</i-button>
         </div>
       }
-    </div>
-  </i-card>
+    }
+    <!-- Recreate the table when the drill-down scope changes so its column filters reset. -->
+    @for (current of [scope()]; track current) {
+      <i-table
+        [grid]="ledger()"
+        dataKey="id"
+        size="small"
+        [sortable]="true"
+        sortField="date"
+        sortOrder="desc"
+        [filterable]="true"
+        [globalFilter]="true"
+        [virtualScroll]="true"
+        [loading]="loading()"
+        height="min(60dvh, 40rem)"
+        emptyMessage="No transactions match. Import a statement or change your filters."
+        downloadMode="api"
+        (onDownload)="export($event)"
+      />
+    }
+  </div>
   @if (draft(); as row) {
     <i-dialog header="Edit transaction" width="56rem" [visible]="true" [closable]="!ui.busy()"
       (visibleChange)="!$event && draft.set(null)">
@@ -374,21 +225,9 @@
             @if (matches() !== null && !matches()?.length) {
               <p>No equal-and-opposite movements found.</p>
             }
-            @for (item of matches(); track item.id) {
-              <div class="list-row">
-                <span>
-                  {{ item.date }} · {{ item.account }} ·
-                  {{ item.description }} · {{ item.amount | zar }}
-                </span>
-                <i-button
-                  [disabled]="ui.busy()"
-                  (clicked)="pair(row.id, item.id)"
-                  severity="secondary"
-                  [outlined]="true"
-                >
-                  Confirm pair
-                </i-button>
-              </div>
+            @if (matches()?.length) {
+              <i-table [grid]="matchGrid()" dataKey="id" size="small" [sortable]="true" [filterable]="true"
+                [globalFilter]="true" [virtualScroll]="true" height="16rem" />
             }
           }
         </i-accordion>
@@ -426,4 +265,4 @@
       </div>
     </i-dialog>
   }
-</div>
+</i-page-layout>

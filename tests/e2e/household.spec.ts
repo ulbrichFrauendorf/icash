@@ -6,6 +6,7 @@ import { _electron as electron, expect, test, type Locator, type Page } from '@p
 test('imports, corrects, budgets, restarts, and restores a household in Electron', async () => {
   const root = mkdtempSync(join(tmpdir(), 'icash-e2e-'));
   const backup = join(root, 'household.icash-backup');
+  const ledgerExport = join(root, 'filtered-ledger.csv');
   const fixture = resolve('tests/fixtures/absa-current.csv');
   const start = () => electron.launch({
     args: ['.', ...(process.env.ICASH_TEST_NO_SANDBOX === '1' ? ['--no-sandbox'] : [])],
@@ -54,6 +55,22 @@ test('imports, corrects, budgets, restarts, and restores a household in Electron
     await expect(page.getByRole('status').filter({ hasText: /0 added, 5 duplicates/ })).toBeVisible();
 
     await nav('Transactions');
+    const ledger = page.locator('icash-transactions i-table').first();
+    const rows = ledger.locator('cdk-virtual-scroll-viewport .i-table-virtual-row');
+    await expect(rows.first()).toContainText('Transfer to savings');
+    await ledger.getByText('Posting date', { exact: true }).click();
+    await expect(rows.first()).toContainText('Salary');
+    const search = ledger.getByRole('textbox', { name: 'Search table' });
+    await search.fill('Checkers refund');
+    await expect(rows).toHaveCount(1);
+    await app.evaluate(({ dialog }, destination) => {
+      dialog.showSaveDialog = async () => ({ canceled: false, filePath: destination });
+    }, ledgerExport);
+    await page.getByRole('button', { name: 'Export results' }).click();
+    await expect(page.getByText('Ledger exported.')).toBeVisible();
+    const exported = readFileSync(ledgerExport, 'utf8');
+    expect(exported).toContain('Checkers refund');
+    expect(exported).not.toContain('Checkers groceries');
     await page.getByRole('button', { name: 'Review Checkers refund' }).click();
     const review = page.getByRole('dialog', { name: 'Edit transaction' });
     await expect(review).toBeVisible();
@@ -110,6 +127,27 @@ test('imports, corrects, budgets, restarts, and restores a household in Electron
     await nav('Budgets');
     await expandGroceries();
     await expect(supermarkets()).toContainText(/1\s?580,00/);
+
+    await nav('Rules');
+    await expect(page.locator('.page-header').getByRole('button', { name: 'Suggest rules with AI' })).toBeVisible();
+    await page.locator('icash-rules i-table').getByRole('button', { name: /^Edit / }).first().click();
+    await expect(page.getByRole('complementary', { name: 'Rule editor' }).getByRole('heading', { name: 'Edit rule' })).toBeVisible();
+
+    await nav('Settings');
+    await page.getByLabel('Payday (1–31)', { exact: true }).fill('25');
+    await page.getByRole('button', { name: 'Save payday' }).click();
+    await expect(page.getByText('Payday saved.')).toBeVisible();
+    await nav('Budgets');
+    await page.getByLabel('Budget month').fill('2025-06');
+    await expect(page.getByText('Budget period 2025-05-25 to 2025-06-24')).toBeVisible();
+    await page.getByRole('button', { name: 'Review spending for Uncategorized' }).click();
+    await expect(page.getByText('Budget contributors')).toBeVisible();
+    const history = page.getByRole('group', { name: 'Page history' });
+    await history.getByRole('button', { name: 'Back' }).click();
+    await expect(page.getByRole('heading', { name: 'Monthly budgets' })).toBeVisible();
+    await history.getByRole('button', { name: 'Forward' }).click();
+    await expect(page.getByText('Budget contributors')).toBeVisible();
+    await expect(page.getByText('2025-05-25 to 2025-06-24')).toBeVisible();
   } finally {
     await app.close();
     rmSync(root, { recursive: true, force: true });
@@ -171,6 +209,7 @@ test('reviews OpenAI classifications and imported rules before saving', async ()
     const importReview = page.getByRole('dialog', { name: 'Review import categories' });
     await expect(importReview).toContainText('3 AI suggestions');
     const chooseImportCategory = async (row: number, category: string) => {
+      await importReview.getByRole('button', { name: 'Change category for row ' + row, exact: true }).click();
       await importReview.getByRole('button', { name: new RegExp('^Category for row ' + row + ':') }).click();
       await page.getByRole('option', { name: category, exact: true }).click();
     };
@@ -197,8 +236,12 @@ test('reviews OpenAI classifications and imported rules before saving', async ()
     await nav('Rules');
     await page.getByRole('button', { name: 'Suggest rules with AI' }).click();
     const rules = page.getByRole('dialog', { name: 'Review AI rule suggestions' });
-    await expect(rules.getByText('Synthetic Cobbler', { exact: true })).toBeVisible();
-    await expect(rules.getByText('Description contains SYNTHETIC COBBLER', { exact: true })).toBeVisible();
+    const changeCobbler = page.getByRole('button', { name: 'Change category for SYNTHETIC COBBLER' });
+    const cobblerSuggestion = rules.locator('cdk-virtual-scroll-viewport .i-table-virtual-row').filter({ has: changeCobbler });
+    await expect(cobblerSuggestion.getByText('Synthetic Cobbler', { exact: true })).toBeVisible();
+    await expect(cobblerSuggestion.getByText('SYNTHETIC COBBLER', { exact: true })).toBeVisible();
+    await expect(rules.getByText('Description contains', { exact: true })).toBeVisible();
+    await changeCobbler.click();
     await expect(rules.getByRole('button', { name: /Category for SYNTHETIC COBBLER:.*Shoe Repairs/ })).toBeVisible();
     await rules.getByRole('button', { name: 'Save and apply to uncategorized' }).click();
     await expect(page.getByText('Saved 1 rule and categorized 1 imported transaction.')).toBeVisible();

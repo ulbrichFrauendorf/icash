@@ -1,6 +1,12 @@
 @if (ui.profiles().active; as profile) {
   <i-layout [config]="config" [menuModel]="menu">
     <ng-container topbarActions>
+      <div class="page-navigation" role="group" aria-label="Page history">
+        <i-button icon="pi pi-arrow-left" ariaLabel="Back" [text]="true" severity="contrast"
+          [disabled]="!ui.history.canBack() || ui.busy()" (clicked)="ui.history.back()" />
+        <i-button icon="pi pi-arrow-right" ariaLabel="Forward" [text]="true" severity="contrast"
+          [disabled]="!ui.history.canForward() || ui.busy()" (clicked)="ui.history.forward()" />
+      </div>
       <div class="topbar-context">
         <i-tag [value]="profile.name" icon="pi pi-users" severity="contrast" />
         <i-tag value="Local ledger · ZAR" icon="pi pi-lock" severity="success" />

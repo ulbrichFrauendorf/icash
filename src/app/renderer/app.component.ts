@@ -3,7 +3,7 @@ import { NavigationStart, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { IButton, IMessage, ITag, LayoutComponent, LayoutService, type LayoutConfig } from 'invensys-ng';
 import { ProfilesPage } from '../../features/profiles/profiles.component';
-import { householdMenu, screenPaths } from '../../shared/ui/navigation';
+import { householdMenu } from '../../shared/ui/navigation';
 import { Ui } from '../../shared/ui/state';
 
 @Component({
@@ -26,7 +26,6 @@ export class App {
     constructor() {
         this.router.events.pipe(takeUntilDestroyed()).subscribe((event) => {
             if (!(event instanceof NavigationStart)) return;
-            if (event.url !== '/' + screenPaths.Transactions) this.ui.transactionFilter.set({});
             this.ui.error.set('');
             this.ui.info.set('');
         });

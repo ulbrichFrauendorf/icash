@@ -1,9 +1,10 @@
 import { rowChoices, retainChoice } from '../../shared/ui/choices';
-import { IAccordion, IButton, ICard, IInputText, IProgressSpinner, ISelect, ITable, ITag, type GridData, NoContentComponent } from 'invensys-ng';
+import { IAccordion, IButton, ICard, IInputText, IProgressSpinner, ISelect, ITable, ITag, PageHeaderActionsDirective, PageRightSidebarDirective, PageLayoutComponent, type GridData, NoContentComponent } from 'invensys-ng';
 import { Component, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { formatZar, ZarPipe } from '../../shared/ui/pipes';
 import { Ui } from '../../shared/ui/state';
+import { currencyColumn, sortableColumns, tableMoney } from '../../shared/ui/table-columns';
 import type { Account } from '../accounts/contract';
 import type { Report } from './contract';
 
@@ -11,7 +12,7 @@ import { ReportChart } from './chart.component';
 
 @Component({
   selector: 'icash-reports',
-  imports: [FormsModule, ZarPipe, ReportChart, IButton, IInputText, ISelect, ICard, IAccordion, IProgressSpinner, ITable, ITag, NoContentComponent],
+  imports: [FormsModule, ZarPipe, ReportChart, IButton, IInputText, ISelect, ICard, IAccordion, IProgressSpinner, ITable, ITag, NoContentComponent, PageLayoutComponent, PageHeaderActionsDirective, PageRightSidebarDirective],
   templateUrl: './reports.component.html',
 })
 export class ReportsPage {
@@ -43,27 +44,42 @@ export class ReportsPage {
   }
   trendGrid(report: Report, range: number): GridData {
     return {
-      columns: [
-        { field: 'month', header: 'Month' }, { field: 'incomeLabel', header: 'Income', align: 'right' },
-        { field: 'expenseLabel', header: 'Spending', align: 'right' }, { field: 'netLabel', header: 'Cash flow', align: 'right' },
-      ],
-      rows: report.trend.slice(-range).map((row) => ({ ...row, incomeLabel: formatZar(row.income),
-        expenseLabel: formatZar(row.expense), netLabel: formatZar(row.net) })),
+      columns: sortableColumns([
+        { field: 'month', header: 'Month' }, currencyColumn('incomeValue', 'Income'),
+        currencyColumn('expenseValue', 'Spending'), currencyColumn('netValue', 'Cash flow'),
+      ]),
+      rows: report.trend.slice(-range).map((row) => ({ ...row, incomeValue: tableMoney(row.income),
+        expenseValue: tableMoney(row.expense), netValue: tableMoney(row.net) })),
     };
   }
   categoryGrid(report: Report): GridData {
     return {
-      columns: [
-        { field: 'name', header: 'Category' }, { field: 'spending', header: 'Spending', align: 'right' },
+      columns: sortableColumns([
+        { field: 'name', header: 'Category' }, currencyColumn('spending', 'Spending'),
         { field: 'baselineLabel', header: 'Spending patterns' },
-      ],
-      rows: report.categories.map((row) => ({ ...row, spending: formatZar(row.amount),
+      ]),
+      rows: report.categories.map((row) => ({ ...row, spending: tableMoney(row.amount),
         baselineLabel: row.unusual ? 'Above median ' + formatZar(row.baseline) + ' across ' + row.historyMonths + ' verified months' : '—' })),
       actions: [{ id: 'contributors', icon: 'pi pi-list', tooltip: (row) => 'Review spending for ' + row.name,
         handler: (row) => this.drill(report, row.id) }],
     };
   }
-  progressTag(progress: number, target: number) { return Math.round(progress / target * 100) + '%'; }
+  goalGrid(report: Report): GridData {
+    return {
+      columns: sortableColumns([
+        { field: 'name', header: 'Goal' }, currencyColumn('saved', 'Saved'), currencyColumn('targetValue', 'Target'),
+        { field: 'percent', header: 'Progress (%)', type: 'number', align: 'right' },
+      ]),
+      rows: report.goals.map((row) => ({ ...row, saved: tableMoney(row.progress), targetValue: tableMoney(row.target),
+        percent: Math.round(row.progress / row.target * 100) })),
+    };
+  }
+  recurringGrid(report: Report): GridData {
+    return {
+      columns: sortableColumns([{ field: 'name', header: 'Schedule' }, currencyColumn('value', 'Forecast')]),
+      rows: report.recurring.map((row) => ({ ...row, value: tableMoney(row.amount) })),
+    };
+  }
   recurringChart(report: Report) { return this.cached(report, 'recurring', () => ({
     labels: report.recurring.slice(0, 6).map((row) => row.name),
     series: [{ label: 'Forecast', values: report.recurring.slice(0, 6).map((row) => row.amount), colour: '--icash-spending' }],

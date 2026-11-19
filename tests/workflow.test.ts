@@ -13,7 +13,7 @@ import { listRules, recategorize, saveRule } from '../src/features/categorizatio
 import { Imports } from '../src/features/import-statement/main';
 import { commitInput, mapping as mappingSchema, type ImportPreview, type Mapping } from '../src/features/import-statement/contract';
 import { getBudget, recommend, saveAllocation, setClosed } from '../src/features/monthly-budget/main';
-import { fullyCovered, scheduledAmount } from '../src/features/monthly-budget/domain';
+import { budgetMonth, budgetPeriod, fullyCovered, scheduledAmount } from '../src/features/monthly-budget/domain';
 import { ProfileStore } from '../src/features/profiles/main';
 import { csvText, report } from '../src/features/reports/main';
 import { goals, saveEntry, saveGoal } from '../src/features/savings-goals/main';
@@ -35,7 +35,7 @@ const db = () => active().db;
 const account = (name = 'Main', kind: 'current' | 'credit-card' | 'savings' = 'current') =>
   saveAccount(db(), { name, kind, archived: false }).find((row) => row.name === name)!;
 const category = (name: string) => categories(db()).find((row) => row.name === name)!;
-const transactions = () => listTransactions(db(), filters.parse({}), true);
+const transactions = () => listTransactions(db(), filters.parse({}));
 const transaction = (description: string) => transactions().find((row) => row.description === description)!;
 const monthlyReport = () => report(db(), { month, period: 'month' });
 const fixture = (name: string) => resolve('tests/fixtures', name);
@@ -100,7 +100,7 @@ it('keeps profiles isolated, seeds once, and uses a genuinely encrypted database
   saveCategory(db(), { ...grocery, name: 'Food shops' });
   restoreDefaults(db());
   expect(category('Food shops').id).toBe(grocery.id);
-  expect(schemaVersion(db())).toBe(1);
+  expect(schemaVersion(db())).toBe(2);
   expect(() => openDatabase(store.path(profile, 'ledger.sqlite'), randomBytes(32))).toThrow();
   const raw = new DatabaseSync(store.path(profile, 'ledger.sqlite'), { readOnly: true });
   expect(() => raw.prepare('SELECT name FROM profile').get()).toThrow();
@@ -190,7 +190,7 @@ it('keeps manual classifications and exact splits through bulk rules and merge',
   expect(transactionDetail(db(), purchase.id).splits).toHaveLength(2);
   mergeCategories(db(), { from: other.id, to: grocery.id });
   expect(transactionDetail(db(), purchase.id).splits.map((line) => line.categoryId)).toEqual([grocery.id, grocery.id]);
-  expect(listTransactions(db(), filters.parse({ text: 'Checkers' })).total).toBe(2);
+  expect(listTransactions(db(), filters.parse({ text: 'Checkers' }))).toHaveLength(2);
 });
 
 it('reconciles reports, budgets, reversals, transfers, savings, and portable recovery', async () => {
@@ -251,6 +251,42 @@ it('requires verified coverage and preserves a closed budget revision after cate
   expect(setClosed(db(), { month, closed: true }).revision).toBe(2);
 });
 
+it('assigns budget actuals, rollover, coverage, and reports to the configured payday cycle', async () => {
+  const main = account();
+  const groceries = category('Supermarkets').id;
+  const statement = file('payday.csv', [
+    'Date,Description,Amount',
+    '20250524,Checkers previous,-1.00',
+    '20250525,Checkers opens cycle,-20.00',
+    '20250624,Checkers ends cycle,-30.00',
+    '20250625,Checkers next cycle,-40.00',
+  ].join('\n'));
+  await importFile(statement, main.id);
+  expect(store.state().active?.payDay).toBeNull();
+  expect(getBudget(db(), '2025-06')).toMatchObject({ start: '2025-06-01', end: '2025-06-30', actual: 7000 });
+
+  db().prepare('UPDATE profile SET pay_day=?').run(25);
+  expect(store.state().active?.payDay).toBe(25);
+  saveAllocation(db(), { month, categoryId: groceries, amount: 10000, rollover: true });
+  const june = '2025-06';
+  const allocation = saveAllocation(db(), { month: june, categoryId: groceries, amount: 5000, rollover: false });
+  expect(allocation).toMatchObject({ start: '2025-05-25', end: '2025-06-24', actual: 5000, rollover: 9900 });
+  expect(getBudget(db(), '2025-07').actual).toBe(4000);
+  confirmCoverage(db(), { accountId: main.id, start: '2025-04-25', end: '2025-06-24' });
+  expect(recommend(db(), '2025-07').months).toEqual(['2025-05', june]);
+  expect(report(db(), { month: june, period: 'month' })).toMatchObject({
+    start: '2025-05-25', end: '2025-06-24', covered: true, expense: 5000, budgetActual: 5000,
+  });
+  setClosed(db(), { month: june, closed: true });
+  db().prepare('UPDATE profile SET pay_day=?').run(31);
+  expect(getBudget(db(), june)).toMatchObject({
+    start: '2025-05-25', end: '2025-06-24', actual: 5000, closed: true, changed: true,
+  });
+  expect(budgetPeriod('2024-03', 31)).toEqual({ start: '2024-02-29', end: '2024-03-30' });
+  expect(budgetPeriod('2025-01', 1)).toEqual({ start: '2024-12-01', end: '2024-12-31' });
+  expect(budgetMonth('2024-02-29', 31)).toBe('2024-03');
+});
+
 it('previews and imports a portable category template into an independent profile', () => {
   const template = JSON.stringify(portableTemplate(db()));
   const original = active().id;
@@ -275,7 +311,7 @@ it('imports and replays 50,000 rows while returning a bounded preview', async ()
   expect(first.statement.net).toBe(-50000);
   expect(commit(first.token, first.statement).inserted).toBe(50000);
   expect((await importFile(statement, main.id)).inserted).toBe(0);
-  expect(listTransactions(db(), filters.parse({})).total).toBe(50000);
+  expect(listTransactions(db(), filters.parse({}))).toHaveLength(50000);
 }, 30000);
 
 it('proposes AI categories and rules from redacted statements and writes only after confirmation', async () => {

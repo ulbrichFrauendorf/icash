@@ -1,15 +1,16 @@
 import { rowChoices, retainChoice } from '../../shared/ui/choices';
-import { IButton, ICard, IInputText, ISelect, ITag, NoContentComponent } from 'invensys-ng';
-import { Component, inject, signal } from '@angular/core';
+import { IButton, ICard, IInputText, ISelect, ITable, PageHeaderActionsDirective, PageHeaderContentDirective, PageLayoutComponent, PageRightSidebarDirective, type GridData } from 'invensys-ng';
+import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { Requests } from '../../shared/api';
-import { ZarPipe } from '../../shared/ui/pipes';
 import { currentDate, money, moneyText, Ui } from '../../shared/ui/state';
-import type { Goal } from './contract';
+import { revealPageSidebar } from '../../shared/ui/navigation';
+import { currencyColumn, sortableColumns, tableMoney } from '../../shared/ui/table-columns';
+import type { Goal, GoalEntry } from './contract';
 
 @Component({
   selector: 'icash-savings',
-  imports: [FormsModule, ZarPipe, IButton, IInputText, ISelect, ICard, ITag, NoContentComponent],
+  imports: [FormsModule, IButton, IInputText, ISelect, ICard, ITable, PageLayoutComponent, PageHeaderActionsDirective, PageHeaderContentDirective, PageRightSidebarDirective],
   templateUrl: './savings.component.html',
 })
 export class SavingsPage {
@@ -18,6 +19,26 @@ export class SavingsPage {
   readonly ui = inject(Ui);
   readonly goals = signal<Goal[]>([]);
   readonly transfers = signal<Requests['goalTransfers'][1]>([]);
+  readonly grid = computed((): GridData<Goal, GoalEntry> => ({
+    columns: sortableColumns([
+      { field: 'name', header: 'Goal' }, currencyColumn('progressValue', 'Saved'), currencyColumn('targetValue', 'Target'),
+      { field: 'percent', header: 'Progress (%)', align: 'right', type: 'number' }, { field: 'due', header: 'Due date' },
+    ]),
+    rows: this.goals().map((row) => ({ ...row, progressValue: tableMoney(row.progress), targetValue: tableMoney(row.target),
+      percent: Math.round(row.progress / row.target * 100) })),
+    actions: [
+      { id: 'edit', icon: 'pi pi-pencil', tooltip: (row) => 'Edit ' + row.name, handler: (row) => this.edit(row) },
+      { id: 'contribute', icon: 'pi pi-plus', tooltip: (row) => 'Record movement for ' + row.name, handler: (row) => {
+        this.goalId = row.id; this.showEditor('savings-movement');
+      } },
+    ],
+    details: {
+      columns: sortableColumns([{ field: 'date', header: 'Date' }, currencyColumn('value', 'Amount'), { field: 'source', header: 'Source' }]),
+      rows: (row) => row.entries.map((entry) => ({ ...entry, value: tableMoney(entry.amount), source: entry.pairId ? 'Paired transfer' : 'Manual' })),
+      actions: [{ id: 'remove', icon: 'pi pi-trash', tooltip: 'Remove movement', disabled: () => this.ui.busy(), handler: (row) => this.remove(row.id) }],
+    },
+  }));
+  editorVisible = true;
   draft: { id?: string; name: string; target: string; due: string } = { name: '', target: '', due: '' };
   goalId = '';
   pairId = '';
@@ -29,9 +50,10 @@ export class SavingsPage {
       this.goals.set(goals); this.transfers.set(transfers);
     });
   }
-  progress(goal: Goal) { return Math.round(goal.progress / goal.target * 100) + '%'; }
-  edit(goal: Goal) { this.draft = { ...goal, target: moneyText(goal.target), due: goal.due ?? '' }; }
+  edit(goal: Goal) { this.draft = { ...goal, target: moneyText(goal.target), due: goal.due ?? '' }; this.showEditor(); }
   reset() { this.draft = { name: '', target: '', due: '' }; }
+  add() { this.reset(); this.showEditor(); }
+  private showEditor(id = 'savings-editor') { this.editorVisible = true; revealPageSidebar(id); }
   save() {
     return this.ui.run(async () => {
       this.goals.set(await this.ui.api.saveGoal({ ...this.draft, due: this.draft.due || null, target: money(this.draft.target) }));

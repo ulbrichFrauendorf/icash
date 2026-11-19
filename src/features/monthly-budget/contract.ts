@@ -11,7 +11,7 @@ export type BudgetRow = {
   allocated: number | null; rollover: number; carryForward: boolean; actual: number; remaining: number | null; variance: number | null; usage: number | null;
 };
 export type Budget = {
-  month: string; rows: BudgetRow[]; allocated: number; rollover: number; actual: number; remaining: number;
+  month: string; start: string; end: string; rows: BudgetRow[]; allocated: number; rollover: number; actual: number; remaining: number;
   closed: boolean; delta: number | null; revision: number | null; changed: boolean;
 };
 export type Recommendation = {

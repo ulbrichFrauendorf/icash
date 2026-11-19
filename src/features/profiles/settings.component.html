@@ -1,13 +1,8 @@
-<div class="workspace-page">
-  <div class="page-heading">
-    <div>
-      <h1>Settings</h1>
-      <p>Manage households, appearance, encrypted backups, and OpenAI.</p>
-    </div>
-  </div>
+<i-page-layout class="workspace-page" headerText="Settings">
+  <p iPageHeaderContent class="muted">Manage households, appearance, encrypted backups, and OpenAI.</p>
   <i-tabs>
     <i-tab-panel header="Households" icon="pi pi-users">
-      <div class="tab-content">
+      <div class="tab-content stack">
         <i-card class="surface">
           <div class="stack">
             <h2>Households</h2>
@@ -41,6 +36,23 @@
               Create household
             </i-button>
           </div>
+        </i-card>
+        <i-card class="surface">
+          <form class="stack" (ngSubmit)="savePayDay()">
+            <h2>Budget cycle</h2>
+            <i-input-text
+              [id]="'settings-pay-day'"
+              name="payDay"
+              label="Payday (1–31)"
+              type="number"
+              [ngModel]="payDay"
+              (ngModelChange)="payDay = $event == null ? '' : $event.toString()"
+              [fluid]="true"
+              [forceFloated]="true"
+            />
+            <p class="muted">Leave blank to use calendar months. Payday on the 25th gives the June budget a period of 25 May through 24 June. In shorter months, payday falls on the last day.</p>
+            <i-button type="submit" [disabled]="ui.busy() || !validPayDay()" severity="primary">Save payday</i-button>
+          </form>
         </i-card>
       </div>
     </i-tab-panel>
@@ -141,4 +153,4 @@
       </div>
     </i-tab-panel>
   </i-tabs>
-</div>
+</i-page-layout>

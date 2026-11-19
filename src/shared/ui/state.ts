@@ -2,10 +2,12 @@ import { inject, Injectable, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { ConfirmationDialogService } from 'invensys-ng';
 import { screenPaths, type Screen } from './navigation';
+import { PageHistory } from './history';
 import type { Api, IpcResult } from '../api';
 import type { ProfileState } from '../../features/profiles/contract';
 import type { Filters } from '../../features/transactions/contract';
 import { decimalMoney, localDate, parseMoney } from '../finance';
+import { budgetMonth } from '../../features/monthly-budget/domain';
 
 type Bridge = Record<keyof Api, (input?: unknown) => Promise<IpcResult<unknown>>>;
 
@@ -14,11 +16,11 @@ export class Ui {
   readonly profiles = signal<ProfileState>({ profiles: [], active: null });
   private readonly router = inject(Router);
   private readonly confirmation = inject(ConfirmationDialogService);
+  readonly history = inject(PageHistory);
   readonly busy = signal(false);
   readonly error = signal('');
   readonly info = signal('');
   readonly month = signal(localDate().slice(0, 7));
-  readonly transactionFilter = signal<Filters>({});
   readonly api = new Proxy({} as Api, {
     get: (_, key: keyof Api) => async (input?: unknown) => {
       const bridge = (window as Window & { icash?: Bridge }).icash;
@@ -32,14 +34,20 @@ export class Ui {
   go(screen: Screen, filters: Filters = {}) {
     this.error.set('');
     this.info.set('');
-    if (screen === 'Transactions') this.transactionFilter.set(filters);
-    void this.router.navigateByUrl('/' + screenPaths[screen]);
+    const queryParams = screen === 'Transactions'
+      ? { ...filters, categoryId: filters.categoryId === null ? 'uncategorized' : filters.categoryId }
+      : undefined;
+    void this.router.navigate(['/', screenPaths[screen]], { queryParams });
   }
 
   state(state: ProfileState, returnToOverview = true) {
-    if (this.profiles().active?.id !== state.active?.id) {
-      this.transactionFilter.set({});
-      if (returnToOverview) void this.router.navigateByUrl('/overview');
+    const previous = this.profiles().active;
+    const today = localDate();
+    const currentMonth = budgetMonth(today, state.active?.payDay ?? null);
+    if (this.month() === budgetMonth(today, previous?.payDay ?? null)) this.month.set(currentMonth);
+    if (previous?.id !== state.active?.id) {
+      this.history.reset();
+      if (returnToOverview) void this.router.navigateByUrl('/overview', { replaceUrl: true });
     }
     this.profiles.set(state);
   }

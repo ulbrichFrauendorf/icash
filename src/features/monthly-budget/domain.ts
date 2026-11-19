@@ -1,4 +1,24 @@
-import { cents, monthEnd } from '../../shared/finance';
+import { cents, monthEnd, shiftMonth } from '../../shared/finance';
+
+function payDate(month: string, payDay: number) {
+  const day = Math.min(payDay, Number(monthEnd(month).slice(-2)));
+  return month + '-' + String(day).padStart(2, '0');
+}
+
+export function budgetPeriod(month: string, payDay: number | null) {
+  if (payDay === null) return { start: month + '-01', end: monthEnd(month) };
+  const previous = shiftMonth(month, -1);
+  const start = payDate(previous, payDay);
+  const cutoff = payDate(month, payDay);
+  const day = Number(cutoff.slice(-2)) - 1;
+  const end = day === 0 ? monthEnd(previous) : month + '-' + String(day).padStart(2, '0');
+  return { start, end };
+}
+
+export function budgetMonth(date: string, payDay: number | null) {
+  const month = date.slice(0, 7);
+  return payDay !== null && date >= payDate(month, payDay) ? shiftMonth(month, 1) : month;
+}
 
 export function scheduledAmount(value: number, cadence: 'weekly' | 'monthly' | 'annual', month: string): number {
   if (cadence === 'monthly') return cents(value);
@@ -7,9 +27,9 @@ export function scheduledAmount(value: number, cadence: 'weekly' | 'monthly' | '
   return base + Number(Number(month.slice(5, 7)) <= value % 12);
 }
 
-export function fullyCovered(month: string, periods: { start: string; end: string }[]) {
-  let next = month + '-01';
-  const end = monthEnd(month);
+export function fullyCovered(month: string, periods: { start: string; end: string }[], payDay: number | null = null) {
+  const { start, end } = budgetPeriod(month, payDay);
+  let next = start;
   for (const period of [...periods].sort((a, b) => a.start.localeCompare(b.start))) {
     if (period.start > next) return false;
     if (period.end < next) continue;

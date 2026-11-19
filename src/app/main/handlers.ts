@@ -11,11 +11,11 @@ import { mergeInput, saveCategoryInput } from '../../features/categories/contrac
 import { portableTemplate, Templates } from '../../features/categories/portable';
 import { merchantInput, saveRuleInput } from '../../features/categorization/contract';
 import { listRules, recategorize, saveMerchant, saveRule } from '../../features/categorization/main';
-import { commitInput, decodeInput, importReviewInput, previewInput, selectImportInput } from '../../features/import-statement/contract';
+import { commitInput, decodeInput, previewInput, selectImportInput } from '../../features/import-statement/contract';
 import { auditRows, batches, Imports } from '../../features/import-statement/main';
 import { allocationInput, closeInput, copyInput, defaultInput, monthInput } from '../../features/monthly-budget/contract';
 import { copyBudget, getBudget, recommend, saveAllocation, saveDefault, setClosed } from '../../features/monthly-budget/main';
-import { createProfileInput, profileIdInput, selectThemeInput } from '../../features/profiles/contract';
+import { createProfileInput, payDayInput, profileIdInput, selectThemeInput } from '../../features/profiles/contract';
 import type { ProfileStore } from '../../features/profiles/main';
 import { scheduleInput } from '../../features/recurring/contract';
 import { saveSchedule, schedules } from '../../features/recurring/main';
@@ -23,7 +23,7 @@ import { reportInput } from '../../features/reports/contract';
 import { csv, numericCsv, report } from '../../features/reports/main';
 import { entryInput, goalInput } from '../../features/savings-goals/contract';
 import { goals, goalTransfers, removeEntry, saveEntry, saveGoal } from '../../features/savings-goals/main';
-import { filters, transactionInput } from '../../features/transactions/contract';
+import { exportTransactionsInput, filters, transactionInput } from '../../features/transactions/contract';
 import { listTransactions, saveTransaction, transactionDetail } from '../../features/transactions/main';
 import { applyAiRulesInput, openAiKeyInput } from '../../features/openai/contract';
 import { AiCategorization } from '../../features/openai/main';
@@ -120,6 +120,10 @@ export function registerHandlers(profiles: ProfileStore, window: () => BrowserWi
     db().prepare('UPDATE profile SET theme=?').run(theme);
     return profiles.state();
   });
+  handle('setPayDay', payDayInput, ({ payDay }) => {
+    db().prepare('UPDATE profile SET pay_day=?').run(payDay);
+    return profiles.state();
+  });
   handle('accounts', empty, () => accounts(db()));
   handle('saveAccount', saveAccountInput, (input) => saveAccount(db(), input));
   handle('confirmCoverage', coverageInput, (input) => confirmCoverage(db(), input));
@@ -164,14 +168,12 @@ export function registerHandlers(profiles: ProfileStore, window: () => BrowserWi
     }
     return { ...preview, review: imports.setReview(profile.id, token, preview.version, rows, suggestions, notice) };
   });
-  handle('importReviewPage', importReviewInput, ({ token, version, page }) =>
-    imports.reviewPage(active().id, token, version, page));
   handle('commitImport', commitInput, (input) => imports.commit(db(), active().id, input));
   handle('cancelImport', profileIdInput, ({ id }) => { imports.cancel(active().id, id); });
   handle('exportErrors', profileIdInput, ({ id }) => saveText('Export rejected rows', 'icash-import-errors.csv', () =>
     csv(['Source row', 'Reason', 'Original columns…'], imports.errors(active().id, id))));
   handle('batches', empty, () => batches(db()));
-  handle('audit', profileIdInput.extend({ page: z.int().min(0).max(1000) }), ({ id, page }) => auditRows(db(), id, page));
+  handle('audit', profileIdInput, ({ id }) => auditRows(db(), id));
   handle('transactions', filters, (input) => listTransactions(db(), input));
   handle('transaction', profileIdInput, ({ id }) => transactionDetail(db(), id));
   handle('saveTransaction', transactionInput, (input) => saveTransaction(db(), input));
@@ -215,10 +217,14 @@ export function registerHandlers(profiles: ProfileStore, window: () => BrowserWi
       ...row.categories.map((entry) => [row.start, row.end, 'Net category spending', entry.name, entry.amount]),
     ]);
   }));
-  handle('exportTransactions', filters, (input) => saveText('Export ledger', 'icash-transactions.csv', () =>
-    numericCsv(['Date', 'Account', 'Description', 'Merchant', 'Bank amount (ZAR)', 'Contribution (ZAR)', 'Category', 'Treatment', 'Notes', 'Tags'],
-      listTransactions(db(), input, true).map((row) =>
-        [row.date, row.account, row.description, row.merchant, row.amount, row.contribution, row.category, row.treatment, row.notes, row.tags]))));
+  handle('exportTransactions', exportTransactionsInput, ({ scope, ids }) => saveText('Export ledger', 'icash-transactions.csv', () => {
+    const byId = new Map(listTransactions(db(), scope).map((row) => [row.id, row]));
+    return numericCsv(['Date', 'Account', 'Description', 'Merchant', 'Bank amount (ZAR)', 'Contribution (ZAR)', 'Category', 'Treatment', 'Notes', 'Tags'],
+      ids.flatMap((id) => {
+        const row = byId.get(id);
+        return row ? [[row.date, row.account, row.description, row.merchant, row.amount, row.contribution, row.category, row.treatment, row.notes, row.tags]] : [];
+      }));
+  }));
   handle('exportBackup', passphrase, async ({ passphrase }) => {
     const profile = active().id;
     const destination = await savePath('Save encrypted backup', 'household.icash-backup');

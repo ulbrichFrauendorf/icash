@@ -1,45 +1,10 @@
-<div class="workspace-page">
-  <div class="page-heading">
-    <div>
-      <h1>Recurring activity</h1>
-      <p>
-        Review subscriptions, bills, and regular income. Confirmed schedules
-        appear in forecasts.
-      </p>
-    </div>
-    <i-button (clicked)="newSchedule()" severity="secondary" [outlined]="true">
-      Add schedule
-    </i-button>
+<i-page-layout class="workspace-page" headerText="Recurring activity">
+  <p iPageHeaderContent class="muted">Review subscriptions, bills, and regular income. Confirmed schedules appear in forecasts.</p>
+  <div iPageHeaderActions class="actions">
+    <i-button (clicked)="newSchedule()" severity="secondary" [outlined]="true">Add schedule</i-button>
   </div>
-  <div class="split-grid">
-    <i-card class="surface">
-      <div class="stack">
-        <h2>Schedules</h2>
-        @for (row of list(); track row.fingerprint) {
-          <div class="list-row">
-            <div>
-              <strong>{{ row.name }}</strong>
-              <div class="muted">
-                {{ row.amount | zar }} · {{ row.cadence }} · {{ row.next }} ·
-                {{ row.state }}
-              </div>
-            </div>
-            <i-button
-              (clicked)="edit(row)"
-              severity="secondary"
-              [outlined]="true"
-            >
-              Review
-            </i-button>
-          </div>
-        } @empty {
-          <i-no-content
-            message="iCash suggests schedules after three comparable weekly or monthly payments."
-          />
-        }
-      </div>
-    </i-card>
-    @if (draft; as row) {
+  @if (draft; as row) {
+    <section iPageRightSidebar id="schedule-editor" label="Schedule editor" [(visible)]="editorVisible" class="stack">
       <i-card class="surface">
         <div class="stack">
           <h2>{{ row.name || 'New schedule' }}</h2>
@@ -79,11 +44,8 @@
           />
           @if (row.evidence.length) {
             <h3>Recent evidence</h3>
-          }
-          @for (item of row.evidence; track $index) {
-            <p>
-              {{ item.date }} · {{ item.description }} · {{ item.amount | zar }}
-            </p>
+            <i-table [grid]="evidenceGrid(row)" size="small" [sortable]="true" [filterable]="true"
+              [virtualScroll]="true" height="12rem" />
           }
           <div class="actions">
             <i-button
@@ -113,6 +75,11 @@
           </div>
         </div>
       </i-card>
-    }
+    </section>
+  }
+  <div class="page-main">
+    <i-table [grid]="grid()" dataKey="fingerprint" size="small"
+      [sortable]="true" [filterable]="true" [globalFilter]="true" [virtualScroll]="true"
+      height="min(52dvh, 30rem)" emptyMessage="iCash suggests schedules after three comparable weekly or monthly payments." />
   </div>
-</div>
+</i-page-layout>

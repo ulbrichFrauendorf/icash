@@ -1,8 +1,10 @@
 import { rowChoices, retainChoice } from '../../shared/ui/choices';
-import { IButton, ICard, ICheckbox, IInputText, ISelect, NoContentComponent } from 'invensys-ng';
-import { Component, inject, signal } from '@angular/core';
+import { IButton, ICard, ICheckbox, IInputText, ISelect, ITable, PageHeaderActionsDirective, PageHeaderContentDirective, PageLayoutComponent, PageRightSidebarDirective, type GridAction, type GridData } from 'invensys-ng';
+import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Ui } from '../../shared/ui/state';
+import { revealPageSidebar } from '../../shared/ui/navigation';
+import { sortableColumns } from '../../shared/ui/table-columns';
 import type { TemplatePreview } from './portable';
 import type { Category } from './contract';
 
@@ -11,7 +13,7 @@ const newCategory = (): Draft => ({ name: '', kind: 'expense', parentId: null, c
 
 @Component({
   selector: 'icash-categories',
-  imports: [FormsModule, IButton, IInputText, ISelect, ICheckbox, ICard, NoContentComponent],
+  imports: [FormsModule, IButton, IInputText, ISelect, ICheckbox, ICard, ITable, PageLayoutComponent, PageHeaderActionsDirective, PageHeaderContentDirective, PageRightSidebarDirective],
   templateUrl: './categories.component.html',
 })
 export class CategoriesPage {
@@ -21,10 +23,26 @@ export class CategoriesPage {
   readonly list = signal<Category[]>([]);
   readonly usage = signal<Record<string, number> | null>(null);
   readonly template = signal<TemplatePreview | null>(null);
+  readonly grid = computed((): GridData<Category, Category> => {
+    const columns = sortableColumns([
+      { field: 'label', header: 'Category' }, { field: 'kind', header: 'Type' }, { field: 'status', header: 'Status' },
+    ]);
+    const present = (row: Category) => ({
+      ...row, label: [row.icon, row.name].filter(Boolean).join(' '), status: row.archived ? 'Archived' : 'Active',
+    });
+    const actions: GridAction<Category>[] = [
+      { id: 'edit', icon: 'pi pi-pencil', tooltip: (row) => 'Edit ' + row.name, handler: (row) => this.edit(row) },
+    ];
+    return {
+      columns, rows: this.roots().map(present), actions,
+      details: { columns, rows: (row) => this.children(row.id).map(present), actions },
+    };
+  });
+  editorVisible = true;
   draft = newCategory();
   from = '';
   to = '';
-  blank = newCategory;
+  reset() { this.draft = newCategory(); this.showEditor(); }
   constructor() { void this.ui.load(async () => this.list.set(await this.ui.api.categories())); }
   roots() { return this.list().filter((entry) => !entry.parentId); }
   children(id: string) { return this.list().filter((entry) => entry.parentId === id); }
@@ -35,7 +53,8 @@ export class CategoriesPage {
     const parent = this.list().find((item) => item.id === category.parentId);
     return parent ? parent.name + ' / ' + category.name : category.name;
   }
-  edit(category: Category) { this.draft = { ...category }; }
+  edit(category: Category) { this.draft = { ...category }; this.showEditor(); }
+  private showEditor() { this.editorVisible = true; revealPageSidebar('category-editor'); }
   save() { return this.ui.run(async () => { this.list.set(await this.ui.api.saveCategory(this.draft)); this.draft = newCategory(); }, 'Category saved.'); }
   restore() { return this.ui.run(async () => this.list.set(await this.ui.api.restoreDefaults()), 'Missing household defaults restored where possible.'); }
   previewMerge() { return this.ui.run(async () => this.usage.set(await this.ui.api.categoryUsage({ id: this.from }))); }

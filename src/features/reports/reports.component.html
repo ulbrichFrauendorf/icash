@@ -1,299 +1,289 @@
-<div class="workspace-page">
-  <div class="page-heading">
-    <div>
-      <h1>{{ detailed() ? 'Financial reports' : 'Household overview' }}</h1>
-      <p>
-        {{
-          detailed()
-            ? 'Review and export your household’s financial performance.'
-            : 'See what came in, what went out, and what’s left to spend.'
-        }}
-      </p>
-    </div>
-    <i-button (clicked)="ui.go('Import')" severity="primary">
-      Import statement
-    </i-button>
+<i-page-layout class="workspace-page" [headerText]="detailed() ? 'Financial reports' : 'Household overview'"
+  style="--page-layout-right-sidebar-width: 17rem">
+  <div iPageHeaderActions class="actions">
+    @if (detailed()) {
+      <i-button
+        [disabled]="ui.busy()"
+        (clicked)="export()"
+        severity="secondary"
+        [outlined]="true"
+      >
+        Export report
+      </i-button>
+    }
+    <i-button (clicked)="ui.go('Import')" severity="primary">Import statement</i-button>
   </div>
-  <i-card class="surface report-filters">
-    <div class="actions">
-      <i-input-text
-        [id]="'reports-report-month'"
-        label="Report month"
-        type="month"
-        [ngModel]="month"
-        (ngModelChange)="changeMonth($event)"
-        [disabled]="ui.busy()"
-        [fluid]="true"
-        [forceFloated]="true"
-      />
-      @let choices1 =
-        [
-          { value: '', label: 'All accounts' },
-          ...rowChoices(accounts(), 'id', 'name'),
-        ];
-      <i-select
-        label="Account"
-        [disabled]="ui.busy()"
-        [options]="choices1"
-        optionLabel="label"
-        [fluid]="true"
-        [ngModel]="selected(choices1, account)"
-        (ngModelChange)="account = $event.value; refresh()"
-      />
-      @if (detailed()) {
-        @let choices2 =
+  <section iPageRightSidebar label="Report filters">
+    <i-card class="surface">
+      <div class="stack">
+        <h2>Report filters</h2>
+        <i-input-text
+          [id]="'reports-report-month'"
+          label="Report month"
+          type="month"
+          [ngModel]="month"
+          (ngModelChange)="changeMonth($event)"
+          [disabled]="ui.busy()"
+          [fluid]="true"
+          [forceFloated]="true"
+        />
+        @let choices1 =
           [
-            { value: 'month', label: 'Monthly' },
-            { value: 'year', label: 'Annual' },
+            { value: '', label: 'All accounts' },
+            ...rowChoices(accounts(), 'id', 'name'),
           ];
         <i-select
-          label="Period"
+          label="Account"
           [disabled]="ui.busy()"
-          [options]="choices2"
+          [options]="choices1"
           optionLabel="label"
           [fluid]="true"
-          [ngModel]="selected(choices2, period)"
-          (ngModelChange)="period = $event.value; refresh()"
+          [ngModel]="selected(choices1, account)"
+          (ngModelChange)="account = $event.value; refresh()"
         />
-        <i-button
-          [disabled]="ui.busy()"
-          (clicked)="export()"
-          severity="secondary"
-          [outlined]="true"
-        >
-          Export report
-        </i-button>
-      }
-    </div>
-  </i-card>
-  @if (data(); as report) {
-    <div class="metric-grid">
-      <i-card class="metric">
-        <div class="metric-content">
-          <span>
-            <i class="pi pi-arrow-down-left metric-icon" aria-hidden="true"></i>
-            Income
-          </span>
-          <strong data-testid="income">{{ report.income | zar }}</strong>
-        </div>
-      </i-card>
-      <i-card class="metric">
-        <div class="metric-content">
-          <span>
-            <i class="pi pi-arrow-up-right metric-icon" aria-hidden="true"></i>
-            Net spending
-          </span>
-          <strong data-testid="spending">{{ report.expense | zar }}</strong>
-        </div>
-      </i-card>
-      <i-card class="metric">
-        <div class="metric-content">
-          <span>
-            <i class="pi pi-wallet metric-icon" aria-hidden="true"></i>
-            Operating cash flow
-          </span>
-          <strong data-testid="cash-flow">{{ report.net | zar }}</strong>
-        </div>
-      </i-card>
-      <i-card class="metric accent">
-        <div class="metric-content">
-          <span>
-            <i class="pi pi-calculator metric-icon" aria-hidden="true"></i>
-            Budget remaining
-          </span>
-          <strong data-testid="overview-remaining">
-            {{ report.remaining | zar }}
-          </strong>
-        </div>
-      </i-card>
-    </div>
-    <div class="section-header period-label">
-      <span>{{ report.start }} to {{ report.end }}</span>
-      <i-tag
-        [value]="
-          report.covered
-            ? 'Statement coverage confirmed'
-            : 'Statement coverage unconfirmed'
-        "
-        [severity]="report.covered ? 'success' : 'warning'"
-      />
-    </div>
-    @if (!accounts().length) {
-      <i-card class="surface empty">
-        <div class="stack">
-          <h2>Get started</h2>
-          <p>
-            Add an account and import a statement to see your household’s
-            activity.
-          </p>
-          <i-button
-            (clicked)="ui.go('Accounts')"
-            severity="secondary"
-            [outlined]="true"
-          >
-            Set up accounts
-          </i-button>
-        </div>
-      </i-card>
-    }
-    <div class="split-grid">
-      <i-card class="surface">
-        <div class="stack">
-          <div class="section-header">
-            <h2>Income and spending</h2>
-            @let choices3 =
-              [
-                { value: 6, label: '6 months' },
-                { value: 12, label: '12 months' },
-              ];
-            <i-select
-              label="Chart range"
-              [options]="choices3"
-              optionLabel="label"
-              [fluid]="true"
-              [ngModel]="selected(choices3, range)"
-              (ngModelChange)="range = $event.value"
-            />
-          </div>
-          <icash-chart
-            label="Bar chart of monthly income and spending"
-            [labels]="trendLabels(report, range)"
-            [series]="trendSeries(report, range)"
+        @if (detailed()) {
+          @let choices2 =
+            [
+              { value: 'month', label: 'Monthly' },
+              { value: 'year', label: 'Annual' },
+            ];
+          <i-select
+            label="Period"
+            [disabled]="ui.busy()"
+            [options]="choices2"
+            optionLabel="label"
+            [fluid]="true"
+            [ngModel]="selected(choices2, period)"
+            (ngModelChange)="period = $event.value; refresh()"
           />
-          <i-accordion header="View chart data">
-            <i-table
-              [grid]="trendGrid(report, range)"
-              size="small"
-              [scrollable]="true"
-            />
-          </i-accordion>
-        </div>
-      </i-card>
-      <i-card class="surface">
-        <div class="stack">
-          <h2>Spending by category</h2>
-          @if (report.categories.length) {
-            <icash-chart
-              label="Bar chart of top spending categories"
-              type="bar-horizontal"
-              [labels]="categoryLabels(report)"
-              [series]="categorySeries(report)"
-            />
-            <i-table
-              [grid]="categoryGrid(report)"
-              dataKey="id"
-              size="small"
-              [virtualScroll]="true"
-              height="16rem"
-            />
-          } @else {
-            <i-no-content
-              message="Category spending appears after you import a statement."
-            />
-          }
-        </div>
-      </i-card>
-      <i-card class="surface">
-        <div class="stack">
-          <div class="section-header">
-            <h2>Household budget</h2>
+        }
+      </div>
+    </i-card>
+  </section>
+  <div class="page-main report-content">
+    @if (data(); as report) {
+      <div class="metric-grid">
+        <i-card class="metric">
+          <div class="metric-content">
+            <span>
+              <i class="pi pi-arrow-down-left metric-icon" aria-hidden="true"></i>
+              Income
+            </span>
+            <strong data-testid="income">{{ report.income | zar }}</strong>
+          </div>
+        </i-card>
+        <i-card class="metric">
+          <div class="metric-content">
+            <span>
+              <i class="pi pi-arrow-up-right metric-icon" aria-hidden="true"></i>
+              Net spending
+            </span>
+            <strong data-testid="spending">{{ report.expense | zar }}</strong>
+          </div>
+        </i-card>
+        <i-card class="metric">
+          <div class="metric-content">
+            <span>
+              <i class="pi pi-wallet metric-icon" aria-hidden="true"></i>
+              Operating cash flow
+            </span>
+            <strong data-testid="cash-flow">{{ report.net | zar }}</strong>
+          </div>
+        </i-card>
+        <i-card class="metric accent">
+          <div class="metric-content">
+            <span>
+              <i class="pi pi-calculator metric-icon" aria-hidden="true"></i>
+              Budget remaining
+            </span>
+            <strong data-testid="overview-remaining">
+              {{ report.remaining | zar }}
+            </strong>
+          </div>
+        </i-card>
+      </div>
+      <div class="section-header period-label">
+        <span>{{ report.start }} to {{ report.end }}</span>
+        <i-tag
+          [value]="
+            report.covered
+              ? 'Statement coverage confirmed'
+              : 'Statement coverage unconfirmed'
+          "
+          [severity]="report.covered ? 'success' : 'warning'"
+        />
+      </div>
+      @if (!accounts().length) {
+        <i-card class="surface empty">
+          <div class="stack">
+            <h2>Get started</h2>
+            <p>
+              Add an account and import a statement to see your household’s
+              activity.
+            </p>
             <i-button
-              (clicked)="ui.go('Budgets')"
+              (clicked)="ui.go('Accounts')"
               severity="secondary"
               [outlined]="true"
             >
-              Open budgets
+              Set up accounts
             </i-button>
           </div>
-          @if (account) {
-            <p class="muted">Budget figures cover the whole household.</p>
-          }
-          <icash-chart
-            label="Bar chart of household budget and actual spending"
-            [labels]="budgetLabels"
-            [series]="budgetSeries(report)"
-          />
-          <div class="list-row">
-            <span>
-              <i class="pi pi-wallet metric-icon" aria-hidden="true"></i>
-              Allocated
-            </span>
-            <strong>{{ report.allocated | zar }}</strong>
-          </div>
-          <div class="list-row">
-            <span>Actual against budget</span>
-            <strong>{{ report.budgetActual | zar }}</strong>
-          </div>
-        </div>
-      </i-card>
-      <i-card class="surface">
-        <div class="stack">
-          <h2>Review and plan</h2>
-          <div class="list-row">
-            <span>Uncategorized transactions</span>
-            <strong>{{ report.uncategorized }}</strong>
-          </div>
-          <div class="list-row">
-            <i-button (clicked)="ui.go('Savings')" [text]="true">
-              Savings progress to date
-            </i-button>
-            <strong data-testid="goal-progress">
-              {{ report.goalProgress | zar }}
-            </strong>
-          </div>
-          @if (!account) {
-            <div class="list-row">
-              <i-button (clicked)="ui.go('Recurring')" [text]="true">
-                Forecast commitments
-              </i-button>
-              <strong>{{ report.commitments | zar }}</strong>
-            </div>
-          }
-          @if (report.goals.length) {
-            <i-accordion header="Savings goal breakdown">
-              @for (goal of report.goals; track $index) {
-                <div class="list-row">
-                  <span>
-                    {{ goal.name }} · {{ goal.progress | zar }} of
-                    {{ goal.target | zar }}
-                  </span>
-                  <i-tag
-                    [value]="progressTag(goal.progress, goal.target)"
-                    severity="success"
-                  />
-                </div>
-              }
-            </i-accordion>
-          }
-          @if (report.recurring.length) {
-            <i-accordion header="Forecast breakdown">
-              <icash-chart
-                label="Confirmed recurring commitments in the selected period"
-                [labels]="recurringChart(report).labels"
-                [series]="recurringChart(report).series"
+        </i-card>
+      }
+      <div class="split-grid">
+        <i-card class="surface">
+          <div class="stack">
+            <div class="section-header">
+              <h2>Income and spending</h2>
+              @let choices3 =
+                [
+                  { value: 6, label: '6 months' },
+                  { value: 12, label: '12 months' },
+                ];
+              <i-select
+                label="Chart range"
+                [options]="choices3"
+                optionLabel="label"
+                [fluid]="true"
+                [ngModel]="selected(choices3, range)"
+                (ngModelChange)="range = $event.value"
               />
-              @for (entry of report.recurring; track $index) {
-                <div class="list-row">
-                  <span>{{ entry.name }}</span>
-                  <strong>{{ entry.amount | zar }}</strong>
-                </div>
-              }
+            </div>
+            <icash-chart
+              label="Bar chart of monthly income and spending"
+              [labels]="trendLabels(report, range)"
+              [series]="trendSeries(report, range)"
+            />
+            <i-accordion header="View chart data">
+              <i-table
+                [grid]="trendGrid(report, range)"
+                dataKey="month"
+                size="small"
+                [sortable]="true"
+                [filterable]="true"
+                [globalFilter]="true"
+                [virtualScroll]="true"
+                height="16rem"
+              />
             </i-accordion>
-          }
-          @if (detailed()) {
+          </div>
+        </i-card>
+        <i-card class="surface">
+          <div class="stack">
+            <h2>Spending by category</h2>
+            @if (report.categories.length) {
+              <icash-chart
+                label="Bar chart of top spending categories"
+                type="bar-horizontal"
+                [labels]="categoryLabels(report)"
+                [series]="categorySeries(report)"
+              />
+              <i-table
+                [grid]="categoryGrid(report)"
+                dataKey="id"
+                size="small"
+                [sortable]="true"
+                [filterable]="true"
+                [globalFilter]="true"
+                [virtualScroll]="true"
+                height="16rem"
+              />
+            } @else {
+              <i-no-content
+                message="Category spending appears after you import a statement."
+              />
+            }
+          </div>
+        </i-card>
+        <i-card class="surface">
+          <div class="stack">
+            <div class="section-header">
+              <h2>Household budget</h2>
+              <i-button
+                (clicked)="ui.go('Budgets')"
+                severity="secondary"
+                [outlined]="true"
+              >
+                Open budgets
+              </i-button>
+            </div>
+            @if (account) {
+              <p class="muted">Budget figures cover the whole household.</p>
+            }
+            <icash-chart
+              label="Bar chart of household budget and actual spending"
+              [labels]="budgetLabels"
+              [series]="budgetSeries(report)"
+            />
             <div class="list-row">
-              <span>Prior period cash flow</span>
-              <strong>{{ report.prior.net | zar }}</strong>
+              <span>
+                <i class="pi pi-wallet metric-icon" aria-hidden="true"></i>
+                Allocated
+              </span>
+              <strong>{{ report.allocated | zar }}</strong>
             </div>
             <div class="list-row">
-              <span>Change in cash flow</span>
-              <strong>{{ report.net - report.prior.net | zar }}</strong>
+              <span>Actual against budget</span>
+              <strong>{{ report.budgetActual | zar }}</strong>
             </div>
-          }
-        </div>
-      </i-card>
-    </div>
-  } @else if (!ui.error()) {
-    <i-progress-spinner size="small" ariaLabel="Loading report" />
-  }
-</div>
+          </div>
+        </i-card>
+        <i-card class="surface">
+          <div class="stack">
+            <h2>Review and plan</h2>
+            <div class="list-row">
+              <span>Uncategorized transactions</span>
+              <strong>{{ report.uncategorized }}</strong>
+            </div>
+            <div class="list-row">
+              <i-button (clicked)="ui.go('Savings')" [text]="true">
+                Savings progress to date
+              </i-button>
+              <strong data-testid="goal-progress">
+                {{ report.goalProgress | zar }}
+              </strong>
+            </div>
+            @if (!account) {
+              <div class="list-row">
+                <i-button (clicked)="ui.go('Recurring')" [text]="true">
+                  Forecast commitments
+                </i-button>
+                <strong>{{ report.commitments | zar }}</strong>
+              </div>
+            }
+            @if (report.goals.length) {
+              <i-accordion header="Savings goal breakdown">
+                <i-table [grid]="goalGrid(report)" dataKey="id" size="small" [sortable]="true" [filterable]="true"
+                  [globalFilter]="true" [virtualScroll]="true" height="16rem" />
+              </i-accordion>
+            }
+            @if (report.recurring.length) {
+              <i-accordion header="Forecast breakdown">
+                <icash-chart
+                  label="Confirmed recurring commitments in the selected period"
+                  [labels]="recurringChart(report).labels"
+                  [series]="recurringChart(report).series"
+                />
+                <i-table [grid]="recurringGrid(report)" dataKey="id" size="small" [sortable]="true" [filterable]="true"
+                  [globalFilter]="true" [virtualScroll]="true" height="16rem" />
+              </i-accordion>
+            }
+            @if (detailed()) {
+              <div class="list-row">
+                <span>Prior period cash flow</span>
+                <strong>{{ report.prior.net | zar }}</strong>
+              </div>
+              <div class="list-row">
+                <span>Change in cash flow</span>
+                <strong>{{ report.net - report.prior.net | zar }}</strong>
+              </div>
+            }
+          </div>
+        </i-card>
+      </div>
+    } @else if (!ui.error()) {
+      <i-progress-spinner size="small" ariaLabel="Loading report" />
+    }
+  </div>
+</i-page-layout>

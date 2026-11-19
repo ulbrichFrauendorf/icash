@@ -16,6 +16,12 @@ export const screenPaths = {
 
 export type Screen = keyof typeof screenPaths;
 
+export function revealPageSidebar(id: string) {
+    if (matchMedia('(max-width: 61.9375rem)').matches) {
+        requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ block: 'start' }));
+    }
+}
+
 function item(screen: Screen, label: string, icon: string) {
     return { label, icon: 'pi pi-fw pi-' + icon, routerLink: ['/', screenPaths[screen]] };
 }

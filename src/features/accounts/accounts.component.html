@@ -1,41 +1,10 @@
-<div class="workspace-page">
-  <div class="page-heading">
-    <div>
-      <h1>Accounts</h1>
-      <p>Set up the bank accounts and cards in this household.</p>
-    </div>
-    <i-button (clicked)="ui.go('Import')" severity="primary">
-      Import statement
-    </i-button>
+<i-page-layout class="workspace-page" headerText="Accounts">
+  <p iPageHeaderContent class="muted">Manage bank accounts and cards for this household.</p>
+  <div iPageHeaderActions class="actions">
+    <i-button (clicked)="add()" severity="secondary" [outlined]="true">Add account</i-button>
+    <i-button (clicked)="ui.go('Import')" severity="primary">Import statement</i-button>
   </div>
-  <div class="split-grid">
-    <i-card class="surface">
-      <div class="stack">
-        <h2>Household accounts</h2>
-        @if (!accounts().length) {
-          <i-no-content
-            message="Add an account to choose where to import your first statement."
-          />
-        }
-        @for (account of accounts(); track account.id) {
-          <div class="list-row">
-            <div>
-              <strong>{{ account.name }}</strong>
-              <div class="muted">
-                {{ account.kind }}{{ account.archived ? ' · Archived' : '' }}
-              </div>
-            </div>
-            <i-button
-              (clicked)="edit(account)"
-              severity="secondary"
-              [outlined]="true"
-            >
-              Edit
-            </i-button>
-          </div>
-        }
-      </div>
-    </i-card>
+  <section iPageRightSidebar id="account-editor" label="Account editor" [(visible)]="editorVisible" class="stack">
     <i-card class="surface">
       <form class="stack" (ngSubmit)="save()">
         <h2>{{ draft.id ? 'Edit account' : 'Add account' }}</h2>
@@ -93,6 +62,11 @@
         </div>
       </form>
     </i-card>
+  </section>
+  <div class="page-main">
+    <i-table [grid]="grid()" dataKey="id" size="small"
+      [sortable]="true" [filterable]="true" [globalFilter]="true" [virtualScroll]="true"
+      height="min(38dvh, 22rem)" emptyMessage="Add an account to import your first statement." />
     <i-card class="surface">
       <div class="stack">
         <h2>Confirm statement coverage</h2>
@@ -143,4 +117,4 @@
       </div>
     </i-card>
   </div>
-</div>
+</i-page-layout>

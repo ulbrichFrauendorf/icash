@@ -8,13 +8,12 @@ import type { Db } from '../../platform/main/database';
 import { cents, normalizeText } from '../../shared/finance';
 import { UserError } from '../../shared/schema';
 import { categorizer } from '../categorization/main';
-import { mapping as mappingSchema, type AuditRow, type Batch, type Candidate, type FilePreview, type ImportPreview, type ImportReviewRow, type ImportReviewPage, type ImportResult, type Mapping, type RowPreview, type commitInput, type decodeInput } from './contract';
+import { mapping as mappingSchema, type AuditRow, type Batch, type Candidate, type FilePreview, type ImportPreview, type ImportReviewRow, type ImportReview, type ImportResult, type Mapping, type RowPreview, type commitInput, type decodeInput } from './contract';
 import type { CategoryChoice } from '../openai/contract';
 import { patternKey, resolveCategoryChoice, rulePattern, saveApprovedRules, type RuleSuggestion } from '../openai/main';
 import { statementLimit } from './contract';
 import { matchKey, normalizeRow, suggestFormats, suggestMapping } from './domain';
 
-const reviewSize = 30;
 const rowLimit = 60000;
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 
@@ -24,7 +23,7 @@ type ReviewPattern = NonNullable<ReturnType<typeof rulePattern>>;
 type Session = {
   profileId: string; accountId: string; fileName: string; hash: string; bytes: Buffer;
   preview?: { version: string; mapping: Mapping; rows: PreparedRow[]; ledgerVersion: number; review?: {
-    rows: Map<number, ImportReviewRow>; patterns: Map<number, ReviewPattern>; suggested: number; notice?: string;
+    rows: Map<number, ImportReviewRow>; patterns: Map<number, ReviewPattern>;
   } };
 };
 type Existing = Candidate & { id: string };
@@ -262,7 +261,7 @@ export class Imports {
     });
   }
 
-  setReview(profileId: string, token: string, version: string, rows: ImportReviewRow[], rules: RuleSuggestion[], notice?: string) {
+  setReview(profileId: string, token: string, version: string, rows: ImportReviewRow[], rules: RuleSuggestion[], notice?: string): ImportReview {
     const { preview } = this.currentPreview(profileId, token, version);
     const byPattern = new Map(rules.map((rule) => [patternKey({ match: rule.sourceMatch, direction: rule.direction }), rule]));
     const patterns = new Map<number, ReviewPattern>();
@@ -274,16 +273,8 @@ export class Imports {
       if (rule) suggested++;
       return [row.row, { ...row, suggestion: rule?.category }];
     }));
-    preview.review = { rows: reviewed, patterns, suggested, notice };
-    return this.reviewPage(profileId, token, version, 0);
-  }
-
-  reviewPage(profileId: string, token: string, version: string, page: number): ImportReviewPage {
-    const { preview } = this.currentPreview(profileId, token, version);
-    if (!preview.review) throw new UserError('Validate the statement to review categories.');
-    const { rows, suggested, notice } = preview.review;
-    return { rows: [...rows.values()].slice(page * reviewSize, (page + 1) * reviewSize),
-      total: rows.size, suggested, page, size: reviewSize, notice };
+    preview.review = { rows: reviewed, patterns };
+    return { rows: [...reviewed.values()], suggested, notice };
   }
 
   errors(profileId: string, token: string) {
@@ -383,8 +374,8 @@ export function batches(db: Db): Batch[] {
     GROUP BY b.id ORDER BY b.created_at DESC,b.id`).all() as Batch[];
 }
 
-export function auditRows(db: Db, batchId: string, page: number): AuditRow[] {
+export function auditRows(db: Db, batchId: string): AuditRow[] {
   return (db.prepare(`SELECT row_number AS row,state,message,transaction_id AS transactionId,original FROM import_rows
-    WHERE batch_id=? ORDER BY row_number LIMIT 100 OFFSET ?`).all(batchId, page * 100) as
+    WHERE batch_id=? ORDER BY row_number`).all(batchId) as
     (Omit<AuditRow, 'original'> & { original: string })[]).map((row) => ({ ...row, original: JSON.parse(row.original) as string[] }));
 }

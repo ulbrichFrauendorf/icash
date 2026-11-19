@@ -1,11 +1,12 @@
 import { rowChoices, retainChoice } from '../../shared/ui/choices';
-import { IButton, ICard, ICheckbox, IDialog, IFileUpload, type FileUploadOptions, IInputText, IMessage, ISelect, ITable, type GridData, NoContentComponent } from 'invensys-ng';
+import { IButton, ICard, ICheckbox, IDialog, IFileUpload, type FileUploadOptions, IInputText, IMessage, ISelect, ITable, PageHeaderContentDirective, PageLayoutComponent, type GridData } from 'invensys-ng';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { Account } from '../accounts/contract';
-import { formatZar, ZarPipe } from '../../shared/ui/pipes';
+import { ZarPipe } from '../../shared/ui/pipes';
 import { Ui } from '../../shared/ui/state';
-import { statementLimit, type AuditRow, type Batch, type FilePreview, type ImportPreview, type ImportReviewPage, type ImportReviewRow, type Mapping } from './contract';
+import { currencyColumn, sortableColumns, tableMoney } from '../../shared/ui/table-columns';
+import { statementLimit, type AuditRow, type Batch, type FilePreview, type ImportPreview, type ImportReview, type ImportReviewRow, type Mapping } from './contract';
 import type { Category } from '../categories/contract';
 import type { CategoryChoice } from '../openai/contract';
 import { reviewCategoryChoices } from '../../shared/ui/category-choices';
@@ -14,7 +15,7 @@ type Column = 'date' | 'description' | 'amount' | 'debit' | 'credit' | 'balance'
 
 @Component({
   selector: 'icash-import',
-  imports: [FormsModule, ZarPipe, IButton, IInputText, ISelect, ICheckbox, IDialog, IFileUpload, ICard, IMessage, ITable, NoContentComponent],
+  imports: [FormsModule, ZarPipe, IButton, IInputText, ISelect, ICheckbox, IDialog, IFileUpload, ICard, IMessage, ITable, PageLayoutComponent, PageHeaderContentDirective],
   templateUrl: './import.component.html',
 })
 export class ImportPage {
@@ -25,17 +26,17 @@ export class ImportPage {
   readonly batches = signal<Batch[]>([]);
   readonly audit = signal<AuditRow[]>([]);
   account = '';
-  auditBatch = '';
-  auditPage = 0;
+  auditBatch: Batch | null = null;
   file: FilePreview | null = null;
   preview: ImportPreview | null = null;
   validating = false;
   files: File[] = [];
   readonly uploadOptions: FileUploadOptions = { multiple: false, maxFiles: 1, fileTypes: ['.csv', '.txt'],
     maxFileSize: statementLimit, maxTotalSize: statementLimit };
-  review: ImportReviewPage | null = null;
+  readonly review = signal<ImportReview | null>(null);
+  readonly reviewRow = signal<ImportReviewRow | null>(null);
   private categories: Category[] = [];
-  private choices = new Map<number, CategoryChoice>();
+  private readonly choices = signal(new Map<number, CategoryChoice>());
   delimiter: Mapping['delimiter'] = ',';
   encoding: Mapping['encoding'] = 'utf-8';
   header = 1;
@@ -56,32 +57,57 @@ export class ImportPage {
   sourceGrid(file: FilePreview): GridData {
     const width = Math.max(0, ...file.rows.map((row) => row.length));
     return {
-      columns: Array.from({ length: width }, (_, index) => ({ field: 'column' + index, header: 'Column ' + (index + 1) })),
-      rows: file.rows.map((cells) => Object.fromEntries(cells.map((cell, index) => ['column' + index, cell]))),
+      columns: sortableColumns(Array.from({ length: width }, (_, index) => ({ field: 'column' + index, header: 'Column ' + (index + 1) }))),
+      rows: file.rows.map((cells, row) => ({ row, ...Object.fromEntries(cells.map((cell, index) => ['column' + index, cell])) })),
     };
   }
 
   checksGrid(preview: ImportPreview): GridData {
     return {
-      columns: [
-        { field: 'row', header: 'Row' }, { field: 'values', header: 'Original values' }, { field: 'date', header: 'Posting date' },
-        { field: 'amount', header: 'Amount', align: 'right' }, { field: 'result', header: 'Result' },
-      ],
+      columns: sortableColumns([
+        { field: 'row', header: 'Row', type: 'number' }, { field: 'values', header: 'Original values' }, { field: 'date', header: 'Posting date' },
+        currencyColumn('amount', 'Amount'), { field: 'result', header: 'Result' },
+      ]),
       rows: preview.rows.map((row) => ({ row: row.row, values: row.original.join(' · '), date: row.candidate?.date,
-        amount: formatZar(row.candidate?.amount), result: row.message || row.state })),
+        amount: tableMoney(row.candidate?.amount), result: row.message || row.state })),
     };
   }
 
   readonly auditGrid = computed((): GridData => ({
-    columns: [
-      { field: 'row', header: 'Row' }, { field: 'state', header: 'State' },
+    columns: sortableColumns([
+      { field: 'row', header: 'Row', type: 'number' }, { field: 'state', header: 'State' },
       { field: 'message', header: 'Details' }, { field: 'values', header: 'Original values' },
-    ],
+    ]),
     rows: this.audit().map((row) => ({ ...row, values: row.original.join(' · ') })),
   }));
+  readonly batchGrid = computed((): GridData<Batch> => ({
+    columns: sortableColumns([
+      { field: 'file', header: 'Statement' }, { field: 'account', header: 'Account' }, { field: 'date', header: 'Imported' },
+      { field: 'inserted', header: 'Added', type: 'number' }, { field: 'duplicate', header: 'Duplicates', type: 'number' },
+      { field: 'rejected', header: 'Rejected', type: 'number' },
+    ]),
+    rows: this.batches().map((row) => ({ ...row, date: row.createdAt.slice(0, 10) })),
+    actions: [{ id: 'audit', icon: 'pi pi-list', tooltip: (row) => 'View rows for ' + row.file, handler: (row) => this.showAudit(row) }],
+  }));
+  readonly reviewGrid = computed((): GridData<ImportReviewRow> => {
+    const byId = new Map(this.categories.map((category) => [category.id, category.name]));
+    return {
+      columns: sortableColumns([
+        { field: 'row', header: 'Row', type: 'number' }, { field: 'description', header: 'Description' },
+        { field: 'date', header: 'Posting date' }, currencyColumn('amountValue', 'Amount'), { field: 'category', header: 'Category' },
+      ]),
+      rows: (this.review()?.rows ?? []).map((row) => {
+        const choice = this.categorySelection(row);
+        const category = choice === 'suggested' ? row.suggestion?.label : byId.get(choice);
+        return { ...row, category: category ?? 'Uncategorized', amountValue: tableMoney(row.amount) };
+      }),
+      actions: [{ id: 'category', icon: 'pi pi-pencil', tooltip: (row) => 'Change category for row ' + row.row,
+        handler: (row) => this.reviewRow.set(row) }],
+    };
+  });
   fields(): Column[] { return ['date', 'description', ...(this.layout === 'signed' ? ['amount'] as const : ['debit', 'credit'] as const), 'balance', 'reference']; }
   headers() { return this.file?.headers ?? []; }
-  invalidate() { this.preview = null; this.review = null; this.choices.clear(); }
+  invalidate() { this.preview = null; this.closeReview(); this.choices.set(new Map()); }
   reset() { this.files = []; this.file = null; this.invalidate(); }
   selectFiles(files: File[]) {
     const selected = files[0];
@@ -148,7 +174,7 @@ export class ImportPage {
         } });
         if (this.preview.review) {
           this.categories = await this.ui.api.categories();
-          this.review = this.preview.review;
+          this.openReview();
         }
       } finally { this.validating = false; }
     });
@@ -157,33 +183,29 @@ export class ImportPage {
     return reviewCategoryChoices(this.categories, row.treatment, 'Leave uncategorized', row.suggestion);
   }
   categorySelection(row: ImportReviewRow) {
-    return this.choices.get(row.row) ?? (row.suggestion ? 'suggested' : '');
+    return this.choices().get(row.row) ?? (row.suggestion ? 'suggested' : '');
   }
-  chooseCategory(row: number, choice: CategoryChoice) { this.choices.set(row, choice); }
-  openReview() { this.review = this.preview?.review ?? null; }
-  showReviewPage(page: number) {
-    return this.ui.run(async () => {
-      if (!this.file || !this.preview) return;
-      this.review = await this.ui.api.importReviewPage({ token: this.file.token, version: this.preview.version, page });
-    });
+  chooseCategory(row: number, choice: CategoryChoice) {
+    this.choices.update((choices) => new Map(choices).set(row, choice));
   }
+  openReview() { this.review.set(this.preview?.review ?? null); }
+  closeReview() { this.review.set(null); this.reviewRow.set(null); }
   errors() { return this.ui.run(async () => { if (this.file) await this.ui.api.exportErrors({ id: this.file.token }); }); }
   commit(saveRules = false) {
     return this.ui.run(async () => {
       if (!this.file || !this.preview) return;
       const result = await this.ui.api.commitImport({ token: this.file.token, version: this.preview.version,
         acceptRejected: this.preview.counts.rejected > 0,
-        review: this.preview.review ? { saveRules, changes: [...this.choices].map(([row, choice]) => ({ row, choice })) } : undefined });
+        review: this.preview.review ? { saveRules, changes: [...this.choices()].map(([row, choice]) => ({ row, choice })) } : undefined });
       this.reset();
       this.batches.set(await this.ui.api.batches());
       this.ui.info.set(`Import complete. ${result.inserted} added, ${result.duplicate} duplicates, ${result.rejected} rejected.` + (result.rulesSaved ? ` Saved ${result.rulesSaved} rules.` : ''));
     });
   }
-  showAudit(id: string, page = 0) {
+  showAudit(batch: Batch) {
     return this.ui.run(async () => {
-      this.audit.set(await this.ui.api.audit({ id, page }));
-      this.auditBatch = id;
-      this.auditPage = page;
+      this.audit.set(await this.ui.api.audit({ id: batch.id }));
+      this.auditBatch = batch;
     });
   }
 }

@@ -1,11 +1,12 @@
 import type { z } from 'zod';
 import type { Db } from '../../platform/main/database';
-import { cents, median, monthEnd, shiftMonth } from '../../shared/finance';
+import { cents, median, shiftMonth } from '../../shared/finance';
 import { ledgerLines } from '../../shared/ledger';
 import { UserError } from '../../shared/schema';
 import { accounts } from '../accounts/main';
 import { categories } from '../categories/main';
-import { fullyCovered, scheduledAmount } from './domain';
+import { householdPayDay } from '../profiles/main';
+import { budgetMonth, budgetPeriod, fullyCovered, scheduledAmount } from './domain';
 import type { allocationInput, Budget, BudgetRow, closeInput, copyInput, defaultInput, Recommendations } from './contract';
 
 type Allocation = { categoryId: string; amount: number | null; rollover: number };
@@ -29,6 +30,8 @@ function numbers(allocated: number | null, rollover: number, actual: number) {
 }
 
 function liveBudget(db: Db, month: string): Budget {
+  const payDay = householdPayDay(db);
+  const period = budgetPeriod(month, payDay);
   const list = categories(db).filter((item) => item.kind === 'expense');
   const overrides = db.prepare(`SELECT month,category_id AS categoryId,allocation AS amount,rollover
     FROM monthly_allocations WHERE month<=? ORDER BY month`).all(month) as (Allocation & { month: string })[];
@@ -43,9 +46,9 @@ function liveBudget(db: Db, month: string): Budget {
     scheduleBy.set(schedule.categoryId, history);
   }
   const actuals = new Map<string, number>();
-  for (const line of ledgerLines(db, { start: earliest + '-01', end: monthEnd(month) }, 'budget')) {
+  for (const line of ledgerLines(db, { start: budgetPeriod(earliest, payDay).start, end: period.end }, 'budget')) {
     if (line.treatment !== 'expense') continue;
-    const key = line.date.slice(0, 7) + (line.categoryId ?? '');
+    const key = budgetMonth(line.date, payDay) + (line.categoryId ?? '');
     actuals.set(key, cents((actuals.get(key) ?? 0) - line.amount));
   }
   const closureRows = db.prepare(`SELECT r.month,r.snapshot FROM budget_revisions r JOIN budget_status s ON s.month=r.month AND s.closed=1
@@ -87,7 +90,7 @@ function liveBudget(db: Db, month: string): Budget {
   const allocated = sum(rows, 'allocated');
   const rollover = sum(rows, 'rollover');
   const actual = sum(rows, 'actual');
-  return { month, rows: [...parents, ...rows], allocated, rollover, actual, remaining: cents(allocated + rollover - actual),
+  return { month, ...period, rows: [...parents, ...rows], allocated, rollover, actual, remaining: cents(allocated + rollover - actual),
     closed: false, delta: null, revision: null, changed: false };
 }
 
@@ -97,8 +100,10 @@ export function getBudget(db: Db, month: string): Budget {
     .get(month) as { revision: number; snapshot: string } | undefined;
   if (!latest || !status(db, month)) return { ...live, revision: latest?.revision ?? null };
   const saved = JSON.parse(latest.snapshot) as Budget;
-  return { ...saved, closed: true, revision: latest.revision,
-    delta: cents(live.actual - saved.actual), changed: JSON.stringify(live.rows) !== JSON.stringify(saved.rows) };
+  const savedPeriod = { start: saved.start ?? budgetPeriod(month, null).start, end: saved.end ?? budgetPeriod(month, null).end };
+  return { ...saved, ...savedPeriod, closed: true, revision: latest.revision,
+    delta: cents(live.actual - saved.actual),
+    changed: live.start !== savedPeriod.start || live.end !== savedPeriod.end || JSON.stringify(live.rows) !== JSON.stringify(saved.rows) };
 }
 
 export function saveAllocation(db: Db, input: z.infer<typeof allocationInput>) {
@@ -151,16 +156,17 @@ export function setClosed(db: Db, { month, closed }: z.infer<typeof closeInput>)
 }
 
 export function recommend(db: Db, month: string): Recommendations {
+  const payDay = householdPayDay(db);
   const active = accounts(db).filter((account) => !account.archived);
   const coverage = db.prepare('SELECT account_id AS accountId,start,end FROM coverage').all() as { accountId: string; start: string; end: string }[];
   const months = Array.from({ length: 6 }, (_, index) => shiftMonth(month, index - 6)).filter((period) =>
-    active.length > 0 && active.every((account) => fullyCovered(period, coverage.filter((row) => row.accountId === account.id))));
+    active.length > 0 && active.every((account) => fullyCovered(period, coverage.filter((row) => row.accountId === account.id), payDay)));
   const accountIds = new Set(active.map((account) => account.id));
   const actuals = new Map<string, number>();
   if (months.length && months[0] && months.at(-1)) {
     const monthSet = new Set(months);
-    for (const line of ledgerLines(db, { start: months[0] + '-01', end: monthEnd(months.at(-1)!) }, 'budget')) {
-      const period = line.date.slice(0, 7);
+    for (const line of ledgerLines(db, { start: budgetPeriod(months[0], payDay).start, end: budgetPeriod(months.at(-1)!, payDay).end }, 'budget')) {
+      const period = budgetMonth(line.date, payDay);
       if (!accountIds.has(line.accountId) || line.treatment !== 'expense' || !line.categoryId || !monthSet.has(period)) continue;
       const key = line.categoryId + period;
       actuals.set(key, cents((actuals.get(key) ?? 0) - line.amount));

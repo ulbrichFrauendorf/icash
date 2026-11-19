@@ -12,6 +12,10 @@ export interface KeyProtection {
   unwrap(wrapped: Buffer): Buffer;
 }
 
+export function householdPayDay(db: Db): number | null {
+  return (db.prepare('SELECT pay_day AS payDay FROM profile').get() as { payDay: number | null } | undefined)?.payDay ?? null;
+}
+
 export class ProfileStore {
   private current?: { id: string; db: Db };
   private readonly root: string;
@@ -68,7 +72,7 @@ export class ProfileStore {
 
   state(): ProfileState {
     const active = this.current
-      ? this.current.db.prepare('SELECT name,theme FROM profile').get() as Omit<ActiveProfile, 'id'>
+      ? this.current.db.prepare('SELECT name,theme,pay_day AS payDay FROM profile').get() as Omit<ActiveProfile, 'id'>
       : null;
     return { profiles: this.profiles(), active: active && this.current ? { id: this.current.id, ...active } : null };
   }

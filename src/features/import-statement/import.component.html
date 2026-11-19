@@ -1,328 +1,281 @@
-<div class="workspace-page">
-  <div class="page-heading">
-    <div>
-      <h1>Import statements</h1>
-      <p>Drop an Absa statement, then review categories before importing. With OpenAI connected, validation requests suggestions for uncategorized rows.</p>
-    </div>
-  </div>
-  <i-card class="surface">
-    <div class="stack">
-      <h2>Statement file</h2>
-      <div class="actions">
-        @let destinationChoices = [{ value: '', label: 'Select account' }, ...rowChoices(accounts(), 'id', 'name')];
-        <i-select label="Destination account" [options]="destinationChoices" optionLabel="label" [fluid]="true"
-          [disabled]="ui.busy()" [ngModel]="selected(destinationChoices, account)"
-          (ngModelChange)="account = $event.value; reset()" />
-        @if (!accounts().length) {
-          <i-button
-            (clicked)="ui.go('Accounts')"
-            severity="secondary"
-            [outlined]="true"
-          >
-            Add an account
-          </i-button>
-        }
-      </div>
-      <i-file-upload [files]="files" [options]="uploadOptions" [disabled]="!account || ui.busy()"
-        dropLabel="Drop an Absa statement here"
-        [description]="account ? 'or choose a CSV or TXT file' : 'Select the destination account first'"
-        chooseLabel="Browse files" ariaLabel="Choose a statement file" fileIcon="pi pi-file" (filesChange)="selectFiles($event)" />
-    </div>
-  </i-card>
-  @if (file; as current) {
+<i-page-layout class="workspace-page" headerText="Import statements">
+  <p iPageHeaderContent class="muted">Import an Absa statement and review its categories.</p>
+  <div class="page-main">
     <i-card class="surface">
       <div class="stack">
-        <div class="section-header">
-          <h2>Map columns</h2>
-          <i-button
-            [disabled]="ui.busy()"
-            (clicked)="cancel()"
-            severity="secondary"
-            [outlined]="true"
-          >
-            Cancel import
-          </i-button>
-        </div>
-        <p class="muted">{{ current.fileName }}</p>
-        <div class="field-grid">
-          @let choices2 =
-            [
-              { value: ',', label: 'Comma' },
-              { value: ';', label: 'Semicolon' },
-              { value: '\t', label: 'Tab' },
-            ];
-          <i-select
-            label="Delimiter"
-            [options]="choices2"
-            optionLabel="label"
-            [fluid]="true"
-            [disabled]="ui.busy()"
-            [ngModel]="selected(choices2, delimiter)"
-            (ngModelChange)="delimiter = $event.value; invalidate()"
-          />
-          @let choices3 =
-            [
-              { value: 'utf-8', label: 'UTF-8' },
-              { value: 'windows-1252', label: 'Windows-1252' },
-              { value: 'utf-16le', label: 'UTF-16LE' },
-            ];
-          <i-select
-            label="Encoding"
-            [options]="choices3"
-            optionLabel="label"
-            [fluid]="true"
-            [disabled]="ui.busy()"
-            [ngModel]="selected(choices3, encoding)"
-            (ngModelChange)="encoding = $event.value; invalidate()"
-          />
-          <i-input-text
-            [id]="'import-header-record'"
-            label="Header record"
-            type="number"
-            [fluid]="true"
-            [disabled]="ui.busy()"
-            [ngModel]="header"
-            (ngModelChange)="header = +$event; invalidate()"
-          />
-          <i-button
-            [disabled]="ui.busy()"
-            (clicked)="decode()"
-            severity="secondary"
-            [outlined]="true"
-          >
-            Read columns
-          </i-button>
-        </div>
-        <i-table
-          [grid]="sourceGrid(current)"
-          size="small"
-          [scrollable]="true"
-        />
-        <div class="field-grid">
-          @let choices4 =
-            [
-              { value: 'signed', label: 'Signed amount' },
-              { value: 'separate', label: 'Separate debit and credit' },
-            ];
-          <i-select
-            label="Amount layout"
-            [options]="choices4"
-            optionLabel="label"
-            [fluid]="true"
-            [disabled]="ui.busy()"
-            [ngModel]="selected(choices4, layout)"
-            (ngModelChange)="layout = $event.value; invalidate()"
-          />
-          @let choices5 =
-            [
-              { value: '', label: 'Select date format' },
-              { value: 'ymd', label: 'Year-month-day (YYYY-MM-DD or YYYYMMDD)' },
-              { value: 'dmy', label: 'Day-month-year' },
-              { value: 'mdy', label: 'Month-day-year' },
-            ];
-          <i-select
-            label="Date format"
-            [options]="choices5"
-            optionLabel="label"
-            [fluid]="true"
-            [disabled]="ui.busy()"
-            [ngModel]="selected(choices5, dateFormat)"
-            (ngModelChange)="dateFormat = $event.value; invalidate()"
-          />
-          @let choices6 =
-            [
-              { value: '', label: 'Select decimal separator' },
-              { value: '.', label: 'Period (123.45)' },
-              { value: ',', label: 'Comma (123,45)' },
-            ];
-          <i-select
-            label="Decimal separator"
-            [options]="choices6"
-            optionLabel="label"
-            [fluid]="true"
-            [disabled]="ui.busy()"
-            [ngModel]="selected(choices6, decimal)"
-            (ngModelChange)="decimal = $event.value; invalidate()"
-          />
-          <i-checkbox
-            label="Invert amount signs"
-            [disabled]="ui.busy()"
-            [(ngModel)]="invert"
-            (ngModelChange)="invalidate()"
-          />
-        </div>
-        <div class="field-grid">
-          @for (key of fields(); track key) {
-            @let choices7 =
-              [
-                { value: undefined, label: 'Unmapped' },
-                ...rowChoices(headers(), 'index', 'index'),
-              ];
-            <i-select
-              [label]="labels[key]"
-              [options]="choices7"
-              optionLabel="label"
-              [fluid]="true"
-              [disabled]="ui.busy()"
-              [ngModel]="selected(choices7, columns[key])"
-              (ngModelChange)="columns[key] = $event.value; invalidate()"
-            />
-          }
-        </div>
+        <h2>Statement file</h2>
         <div class="actions">
-          <i-button
-            [disabled]="!dateFormat || !decimal || ui.busy()"
-            [loading]="validating"
-            (clicked)="validate()"
-            severity="primary"
-          >
-            Validate statement
-          </i-button>
-          @if (validating) {
-            <span role="status">Validating the statement and checking for category suggestions…</span>
-          }
-        </div>
-      </div>
-    </i-card>
-  }
-  @if (preview; as data) {
-    <i-card class="surface">
-      <div class="stack">
-        <h2>Review and import</h2>
-        <div class="summary">
-          {{ data.counts.accepted }} ready ·
-          {{ data.counts.duplicate }} duplicates skipped ·
-          {{ data.counts.rejected }} rejected
-        </div>
-        <p>
-          New transactions · debits {{ data.debits | zar }} · credits
-          {{ data.credits | zar }} · net {{ data.net | zar }}
-        </p>
-        @if (data.reconciliation) {
-          <i-message severity="warning">{{ data.reconciliation }}</i-message>
-        }
-        @if (data.counts.rejected) {
-          <div class="actions">
+          @let destinationChoices = [{ value: '', label: 'Select account' }, ...rowChoices(accounts(), 'id', 'name')];
+          <i-select label="Destination account" [options]="destinationChoices" optionLabel="label" [fluid]="true"
+            [disabled]="ui.busy()" [ngModel]="selected(destinationChoices, account)"
+            (ngModelChange)="account = $event.value; reset()" />
+          @if (!accounts().length) {
             <i-button
-              [disabled]="ui.busy()"
-              (clicked)="errors()"
+              (clicked)="ui.go('Accounts')"
               severity="secondary"
               [outlined]="true"
             >
-              Export rejected rows
-            </i-button>
-          </div>
-        }
-        @if (data.counts.duplicate) {
-          <i-message severity="info">
-            Repeated transactions and rows that match without enough information
-            to distinguish them are skipped. Import history records the reason.
-          </i-message>
-        }
-        <i-table
-          [grid]="checksGrid(data)"
-          dataKey="row"
-          size="small"
-          [virtualScroll]="true"
-          height="20rem"
-        />
-        <div class="actions">
-          @if (data.review) {
-            <i-button [disabled]="ui.busy()" (clicked)="openReview()">Review categories</i-button>
-          } @else {
-            <i-button [disabled]="ui.busy() || (!data.counts.accepted && !!data.counts.rejected)" (clicked)="commit()">
-              {{ data.counts.rejected ? 'Import valid rows' : 'Import new rows' }}
+              Add an account
             </i-button>
           }
         </div>
+        <i-file-upload [files]="files" [options]="uploadOptions" [disabled]="!account || ui.busy()"
+          dropLabel="Drop an Absa statement here"
+          [description]="account ? 'or choose a CSV or TXT file' : 'Select the destination account first'"
+          chooseLabel="Browse files" ariaLabel="Choose a statement file" fileIcon="pi pi-file" (filesChange)="selectFiles($event)" />
       </div>
     </i-card>
-  }
-  <i-card class="surface">
-    <div class="stack">
-      <h2>Import history</h2>
-      @if (!batches().length) {
-        <i-no-content message="Statements you import appear here." />
-      }
-      @for (batch of batches(); track batch.id) {
-        <div class="list-row">
-          <div>
-            <strong>{{ batch.file }}</strong>
-            <div class="muted">
-              {{ batch.account }} · {{ batch.createdAt.slice(0, 10) }} ·
-              {{ batch.inserted }} added · {{ batch.duplicate }} duplicates ·
-              {{ batch.rejected }} rejected
-            </div>
+    @if (file; as current) {
+      <i-card class="surface">
+        <div class="stack">
+          <div class="section-header">
+            <h2>Map columns</h2>
+            <i-button
+              [disabled]="ui.busy()"
+              (clicked)="cancel()"
+              severity="secondary"
+              [outlined]="true"
+            >
+              Cancel import
+            </i-button>
           </div>
-          <i-button
-            [disabled]="ui.busy()"
-            (clicked)="showAudit(batch.id)"
-            severity="secondary"
-            [outlined]="true"
-          >
-            View rows
-          </i-button>
+          <p class="muted">{{ current.fileName }}</p>
+          <div class="field-grid">
+            @let choices2 =
+              [
+                { value: ',', label: 'Comma' },
+                { value: ';', label: 'Semicolon' },
+                { value: '\t', label: 'Tab' },
+              ];
+            <i-select
+              label="Delimiter"
+              [options]="choices2"
+              optionLabel="label"
+              [fluid]="true"
+              [disabled]="ui.busy()"
+              [ngModel]="selected(choices2, delimiter)"
+              (ngModelChange)="delimiter = $event.value; invalidate()"
+            />
+            @let choices3 =
+              [
+                { value: 'utf-8', label: 'UTF-8' },
+                { value: 'windows-1252', label: 'Windows-1252' },
+                { value: 'utf-16le', label: 'UTF-16LE' },
+              ];
+            <i-select
+              label="Encoding"
+              [options]="choices3"
+              optionLabel="label"
+              [fluid]="true"
+              [disabled]="ui.busy()"
+              [ngModel]="selected(choices3, encoding)"
+              (ngModelChange)="encoding = $event.value; invalidate()"
+            />
+            <i-input-text
+              [id]="'import-header-record'"
+              label="Header record"
+              type="number"
+              [fluid]="true"
+              [disabled]="ui.busy()"
+              [ngModel]="header"
+              (ngModelChange)="header = +$event; invalidate()"
+            />
+            <i-button
+              [disabled]="ui.busy()"
+              (clicked)="decode()"
+              severity="secondary"
+              [outlined]="true"
+            >
+              Read columns
+            </i-button>
+          </div>
+          <i-table
+            [grid]="sourceGrid(current)"
+            dataKey="row"
+            size="small"
+            [sortable]="true"
+            [filterable]="true"
+            [globalFilter]="true"
+            [virtualScroll]="true"
+            height="18rem"
+          />
+          <div class="field-grid">
+            @let choices4 =
+              [
+                { value: 'signed', label: 'Signed amount' },
+                { value: 'separate', label: 'Separate debit and credit' },
+              ];
+            <i-select
+              label="Amount layout"
+              [options]="choices4"
+              optionLabel="label"
+              [fluid]="true"
+              [disabled]="ui.busy()"
+              [ngModel]="selected(choices4, layout)"
+              (ngModelChange)="layout = $event.value; invalidate()"
+            />
+            @let choices5 =
+              [
+                { value: '', label: 'Select date format' },
+                { value: 'ymd', label: 'Year-month-day (YYYY-MM-DD or YYYYMMDD)' },
+                { value: 'dmy', label: 'Day-month-year' },
+                { value: 'mdy', label: 'Month-day-year' },
+              ];
+            <i-select
+              label="Date format"
+              [options]="choices5"
+              optionLabel="label"
+              [fluid]="true"
+              [disabled]="ui.busy()"
+              [ngModel]="selected(choices5, dateFormat)"
+              (ngModelChange)="dateFormat = $event.value; invalidate()"
+            />
+            @let choices6 =
+              [
+                { value: '', label: 'Select decimal separator' },
+                { value: '.', label: 'Period (123.45)' },
+                { value: ',', label: 'Comma (123,45)' },
+              ];
+            <i-select
+              label="Decimal separator"
+              [options]="choices6"
+              optionLabel="label"
+              [fluid]="true"
+              [disabled]="ui.busy()"
+              [ngModel]="selected(choices6, decimal)"
+              (ngModelChange)="decimal = $event.value; invalidate()"
+            />
+            <i-checkbox
+              label="Invert amount signs"
+              [disabled]="ui.busy()"
+              [(ngModel)]="invert"
+              (ngModelChange)="invalidate()"
+            />
+          </div>
+          <div class="field-grid">
+            @for (key of fields(); track key) {
+              @let choices7 =
+                [
+                  { value: undefined, label: 'Unmapped' },
+                  ...rowChoices(headers(), 'index', 'index'),
+                ];
+              <i-select
+                [label]="labels[key]"
+                [options]="choices7"
+                optionLabel="label"
+                [fluid]="true"
+                [disabled]="ui.busy()"
+                [ngModel]="selected(choices7, columns[key])"
+                (ngModelChange)="columns[key] = $event.value; invalidate()"
+              />
+            }
+          </div>
+          <div class="actions">
+            <i-button
+              [disabled]="!dateFormat || !decimal || ui.busy()"
+              [loading]="validating"
+              (clicked)="validate()"
+              severity="primary"
+            >
+              Validate statement
+            </i-button>
+            @if (validating) {
+              <span role="status">Validating the statement and checking for category suggestions…</span>
+            }
+          </div>
         </div>
-      }
-      @if (auditBatch) {
-        <i-table
-          [grid]="auditGrid()"
-          dataKey="row"
-          size="small"
-          [virtualScroll]="true"
-          height="23rem"
-        />
-        <div class="actions">
-          <i-button
-            [disabled]="auditPage === 0 || ui.busy()"
-            (clicked)="showAudit(auditBatch, auditPage - 1)"
-            severity="secondary"
-            [outlined]="true"
-          >
-            Previous audit page
-          </i-button>
-          <i-button
-            [disabled]="audit().length < 100 || ui.busy()"
-            (clicked)="showAudit(auditBatch, auditPage + 1)"
-            severity="secondary"
-            [outlined]="true"
-          >
-            Next audit page
-          </i-button>
+      </i-card>
+    }
+    @if (preview; as data) {
+      <i-card class="surface">
+        <div class="stack">
+          <h2>Review and import</h2>
+          <div class="summary">
+            {{ data.counts.accepted }} ready ·
+            {{ data.counts.duplicate }} duplicates skipped ·
+            {{ data.counts.rejected }} rejected
+          </div>
+          <p>
+            New transactions · debits {{ data.debits | zar }} · credits
+            {{ data.credits | zar }} · net {{ data.net | zar }}
+          </p>
+          @if (data.reconciliation) {
+            <i-message severity="warning">{{ data.reconciliation }}</i-message>
+          }
+          @if (data.counts.rejected) {
+            <div class="actions">
+              <i-button
+                [disabled]="ui.busy()"
+                (clicked)="errors()"
+                severity="secondary"
+                [outlined]="true"
+              >
+                Export rejected rows
+              </i-button>
+            </div>
+          }
+          @if (data.counts.duplicate) {
+            <i-message severity="info">
+              Repeated transactions and rows that match without enough information
+              to distinguish them are skipped. Import history records the reason.
+            </i-message>
+          }
+          <i-table
+            [grid]="checksGrid(data)"
+            dataKey="row"
+            size="small"
+            [sortable]="true"
+            [filterable]="true"
+            [globalFilter]="true"
+            [virtualScroll]="true"
+            height="20rem"
+          />
+          <div class="actions">
+            @if (data.review) {
+              <i-button [disabled]="ui.busy()" (clicked)="openReview()">Review categories</i-button>
+            } @else {
+              <i-button [disabled]="ui.busy() || (!data.counts.accepted && !!data.counts.rejected)" (clicked)="commit()">
+                {{ data.counts.rejected ? 'Import valid rows' : 'Import new rows' }}
+              </i-button>
+            }
+          </div>
         </div>
-      }
-    </div>
-  </i-card>
-  @if (review; as categoryReview) {
-    <i-dialog header="Review import categories" width="58rem" [visible]="true" [closable]="!ui.busy()"
-      (visibleChange)="!$event && (review = null)">
+      </i-card>
+    }
+    <i-card class="surface">
       <div class="stack">
-        <p>{{ categoryReview.total }} uncategorized transactions · {{ categoryReview.suggested }} AI suggestions.
-          Change any category below or leave the transaction uncategorized. Importing applies the selections across all pages.</p>
+        <h2>Import history</h2>
+        <i-table [grid]="batchGrid()" dataKey="id" size="small" [sortable]="true" [filterable]="true"
+          [globalFilter]="true" [virtualScroll]="true" height="min(36dvh, 21rem)" emptyMessage="Statements you import appear here." />
+        @if (auditBatch; as batch) {
+          <h3>Rows from {{ batch.file }}</h3>
+          <i-table [grid]="auditGrid()" dataKey="row" size="small" [sortable]="true" [filterable]="true"
+            [globalFilter]="true" [virtualScroll]="true" height="23rem" />
+        }
+      </div>
+    </i-card>
+  </div>
+  @if (review(); as categoryReview) {
+    <i-dialog header="Review import categories" width="58rem" [visible]="true" [closable]="!ui.busy()"
+      (visibleChange)="!$event && closeReview()">
+      <div class="stack">
+        <p>{{ categoryReview.rows.length }} uncategorized transactions · {{ categoryReview.suggested }} AI suggestions.
+          Use the row action to choose a category or leave the transaction uncategorized.</p>
         @if (categoryReview.notice) {
           <i-message severity="info">{{ categoryReview.notice }}</i-message>
         }
         @if (preview && preview.counts.rejected) {
           <i-message severity="warning">{{ preview.counts.rejected }} rejected rows will be skipped.</i-message>
         }
-        @for (row of categoryReview.rows; track row.row) {
+        <i-table [grid]="reviewGrid()" dataKey="row" size="small" [sortable]="true" [filterable]="true"
+          [globalFilter]="true" [virtualScroll]="true" height="min(35dvh, 19rem)" />
+        @if (reviewRow(); as row) {
           @let choices = categoryOptions(row);
-          <div class="list-row import-category-row">
-            <div>
-              <strong>{{ row.description }}</strong>
-              <div class="muted">Row {{ row.row }} · {{ row.date }} · {{ row.amount | zar }}</div>
-            </div>
+          <div class="stack">
+            <strong>{{ row.description }}</strong>
             <i-select [label]="'Category for row ' + row.row" [options]="choices" optionLabel="label" [fluid]="true"
               [disabled]="ui.busy()" [ngModel]="selected(choices, categorySelection(row))"
               (ngModelChange)="chooseCategory(row.row, $event.value)" />
-          </div>
-        }
-        @if (categoryReview.total > categoryReview.size) {
-          <div class="actions">
-            <i-button severity="secondary" [disabled]="ui.busy() || !categoryReview.page" (clicked)="showReviewPage(categoryReview.page - 1)">Previous</i-button>
-            <span>Page {{ categoryReview.page + 1 }}</span>
-            <i-button severity="secondary" [disabled]="ui.busy() || (categoryReview.page + 1) * categoryReview.size >= categoryReview.total"
-              (clicked)="showReviewPage(categoryReview.page + 1)">Next</i-button>
           </div>
         }
         <p class="muted">Selected new expense categories are created on import. Saving rules uses only transaction patterns with a consistent category.</p>
@@ -331,10 +284,10 @@
         }
       </div>
       <div slot="footer" class="actions">
-        <i-button severity="secondary" [disabled]="ui.busy()" (clicked)="review = null">Back</i-button>
+        <i-button severity="secondary" [disabled]="ui.busy()" (clicked)="closeReview()">Back</i-button>
         <i-button severity="secondary" [outlined]="true" [disabled]="ui.busy()" (clicked)="commit()">Import transactions</i-button>
         <i-button [disabled]="ui.busy()" (clicked)="commit(true)">Import and save rules</i-button>
       </div>
     </i-dialog>
   }
-</div>
+</i-page-layout>

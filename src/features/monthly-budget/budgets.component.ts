@@ -1,15 +1,17 @@
 import { retainChoice } from '../../shared/ui/choices';
-import { IButton, ICard, ICheckbox, IInputText, IMessage, ISelect, ITable, ITag, type GridData, type GridAction, type TableColumn, NoContentComponent } from 'invensys-ng';
+import { IButton, ICard, ICheckbox, IInputText, IMessage, ISelect, ITable, ITag, PageHeaderActionsDirective, PageHeaderContentDirective, PageLayoutComponent, PageRightSidebarDirective, type GridData, type GridAction, NoContentComponent } from 'invensys-ng';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { monthEnd, shiftMonth } from '../../shared/finance';
+import { shiftMonth } from '../../shared/finance';
 import { Ui, money, moneyText } from '../../shared/ui/state';
+import { revealPageSidebar } from '../../shared/ui/navigation';
 import { formatZar, ZarPipe } from '../../shared/ui/pipes';
+import { currencyColumn, sortableColumns, tableMoney } from '../../shared/ui/table-columns';
 import type { Budget, BudgetRow, Recommendations } from './contract';
 
 @Component({
   selector: 'icash-budgets',
-  imports: [FormsModule, ZarPipe, IButton, IInputText, ISelect, ICheckbox, ICard, IMessage, ITable, ITag, NoContentComponent],
+  imports: [FormsModule, ZarPipe, IButton, IInputText, ISelect, ICheckbox, ICard, IMessage, ITable, ITag, NoContentComponent, PageLayoutComponent, PageHeaderActionsDirective, PageHeaderContentDirective, PageRightSidebarDirective],
   templateUrl: './budgets.component.html',
 })
 export class BudgetsPage {
@@ -19,6 +21,7 @@ export class BudgetsPage {
   readonly recommendations = signal<Recommendations | null>(null);
   month = this.ui.month();
   selected: BudgetRow | null = null;
+  editorVisible = true;
   amount = '';
   cadence: 'once' | 'monthly' | 'weekly' | 'annual' = 'once';
   rollover = false;
@@ -34,17 +37,17 @@ export class BudgetsPage {
   readonly allocations = computed((): GridData<BudgetRow, BudgetRow> => {
     const budget = this.budget();
     const rows = budget?.rows ?? [];
-    const columns: TableColumn[] = [
-      { field: 'label', header: 'Category' }, { field: 'allocationValue', header: 'Allocated', align: 'right' },
-      { field: 'carryValue', header: 'Rollover', align: 'right' }, { field: 'actualValue', header: 'Actual', align: 'right' },
-      { field: 'remainingValue', header: 'Remaining', align: 'right', severity: (row: BudgetRow) => (row.remaining ?? 0) < 0 ? 'danger' : '' },
-      { field: 'usageValue', header: 'Usage', align: 'right' },
-    ];
+    const columns = sortableColumns([
+      { field: 'label', header: 'Category' }, currencyColumn('allocationValue', 'Allocated'),
+      currencyColumn('carryValue', 'Rollover'), currencyColumn('actualValue', 'Actual'),
+      { ...currencyColumn('remainingValue', 'Remaining'), severity: (row: BudgetRow) => (row.remaining ?? 0) < 0 ? 'danger' : '' },
+      { field: 'usageValue', header: 'Usage (%)', align: 'right', type: 'number' },
+    ]);
     const present = (row: BudgetRow) => ({
       ...row,
       label: row.name + (row.archived ? ' · archived' : ''),
-      allocationValue: formatZar(row.allocated), carryValue: formatZar(row.rollover), actualValue: formatZar(row.actual),
-      remainingValue: formatZar(row.remaining), usageValue: row.usage === null ? '—' : row.usage.toFixed(0) + '%',
+      allocationValue: tableMoney(row.allocated), carryValue: tableMoney(row.rollover), actualValue: tableMoney(row.actual),
+      remainingValue: tableMoney(row.remaining), usageValue: row.usage === null ? null : Math.round(row.usage),
     });
     const actions: GridAction<BudgetRow>[] = budget?.closed ? [] : [
       { id: 'contributors', icon: 'pi pi-list', tooltip: (row) => 'Review spending for ' + row.name, handler: (row) => this.drill(row.categoryId) },
@@ -57,21 +60,23 @@ export class BudgetsPage {
     };
   });
   readonly suggestionGrid = computed((): GridData => ({
-    columns: [
-      { field: 'name', header: 'Category' }, { field: 'suggestion', header: 'Suggested', align: 'right' },
-      { field: 'mean', header: 'Average', align: 'right' }, { field: 'range', header: 'Range' },
-      { field: 'trendLabel', header: 'Trend', align: 'right' },
-    ],
-    rows: (this.recommendations()?.rows ?? []).map((row) => ({ ...row, suggestion: formatZar(row.amount),
-      mean: formatZar(row.average), range: formatZar(row.minimum) + ' to ' + formatZar(row.maximum), trendLabel: formatZar(row.trend) })),
+    columns: sortableColumns([
+      { field: 'name', header: 'Category' }, currencyColumn('suggestion', 'Suggested'), currencyColumn('mean', 'Average'),
+      { field: 'range', header: 'Range', sortable: false }, currencyColumn('trendValue', 'Trend'),
+    ]),
+    rows: (this.recommendations()?.rows ?? []).map((row) => ({ ...row, suggestion: tableMoney(row.amount),
+      mean: tableMoney(row.average), range: formatZar(row.minimum) + ' to ' + formatZar(row.maximum), trendValue: tableMoney(row.trend) })),
     actions: [{ id: 'accept', icon: 'pi pi-check', label: 'Use suggestion',
       disabled: () => !!this.budget()?.closed || this.ui.busy(), handler: (row) => this.use(row.categoryId, row.amount) }],
   }));
-  drill(categoryId: string | null) { this.ui.go('Transactions', { categoryId, scoped: 'budget', start: this.month + '-01', end: monthEnd(this.month) }); }
+  drill(categoryId: string | null) {
+    const budget = this.budget();
+    if (budget) this.ui.go('Transactions', { categoryId, scoped: 'budget', start: budget.start, end: budget.end });
+  }
   edit(row: BudgetRow) {
     this.selected = row; this.amount = row.allocated === null ? '' : moneyText(row.allocated);
-    this.cadence = 'once'; this.rollover = row.carryForward;
-    requestAnimationFrame(() => document.getElementById('allocation-editor')?.scrollIntoView({ block: 'center' }));
+    this.cadence = 'once'; this.rollover = row.carryForward; this.editorVisible = true;
+    revealPageSidebar('allocation-editor');
   }
   save() {
     const categoryId = this.selected?.categoryId;

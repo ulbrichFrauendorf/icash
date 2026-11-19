@@ -29,3 +29,23 @@ if (!source.includes(mitigation)) {
     if (!source.includes(anchor)) throw new Error('The pinned picomatch parser did not match its expected source.');
     writeFileSync(parser, source.replace(anchor, mitigation));
 }
+
+const invensysManifest = require.resolve('invensys-ng/package.json');
+const invensys = JSON.parse(readFileSync(invensysManifest, 'utf8'));
+if (invensys.version === '23.3.3') {
+    const bundle = join(dirname(invensysManifest), invensys.module);
+    const tableSource = readFileSync(bundle, 'utf8');
+    // ITable mutates its sort inputs without invalidating its computed row list.
+    // Refresh that computation so the library still handles sorting and filtering.
+    const patches = [
+        ['\tprocessedData = computed(() => {\n', '\tsortRevision = signal(0);\n\tprocessedData = computed(() => {\n\t\tthis.sortRevision();\n'],
+        ['\t\tthis.onSort.emit({\n\t\t\tfield: this.sortField,', '\t\tthis.sortRevision.update((revision) => revision + 1);\n\t\tthis.onSort.emit({\n\t\t\tfield: this.sortField,'],
+    ];
+    let patched = tableSource;
+    for (const [original, replacement] of patches) {
+        if (patched.includes(replacement)) continue;
+        if (!patched.includes(original)) throw new Error('The pinned Invensys table did not match its expected source.');
+        patched = patched.replace(original, replacement);
+    }
+    if (patched !== tableSource) writeFileSync(bundle, patched);
+}

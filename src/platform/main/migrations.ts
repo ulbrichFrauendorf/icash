@@ -167,4 +167,6 @@ export const migrations = [`
     next TEXT NOT NULL,
     state TEXT NOT NULL CHECK(state IN ('confirmed','dismissed'))
   ) STRICT;
+`, `
+  ALTER TABLE profile ADD COLUMN pay_day INTEGER CHECK(pay_day BETWEEN 1 AND 31);
 `] as const;

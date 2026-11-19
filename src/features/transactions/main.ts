@@ -3,9 +3,8 @@ import type { Db } from '../../platform/main/database';
 import { cents } from '../../shared/finance';
 import { UserError } from '../../shared/schema';
 import { categories } from '../categories/main';
-import type { EditTransaction, filters, Transaction, TransactionDetail, TransactionPage } from './contract';
+import type { EditTransaction, filters, Transaction, TransactionDetail } from './contract';
 
-const pageSize = 50;
 const projection = `SELECT t.id,t.account_id AS accountId,t.batch_id AS batchId,a.name AS account,t.date,t.amount,t.description,
   t.balance,t.reference,t.merchant,t.notes,t.tags,t.treatment,t.category_id AS categoryId,c.name AS category,
   t.classification,r.name AS rule,tl.pair_id AS pairId,t.exclude_budget AS excludeBudget,t.exclude_reports AS excludeReports,
@@ -17,9 +16,7 @@ function uiRow(row: Transaction): Transaction {
   return { ...row, excludeBudget: Boolean(row.excludeBudget), excludeReports: Boolean(row.excludeReports), hasSplits: Boolean(row.hasSplits) };
 }
 
-export function listTransactions(db: Db, input: z.infer<typeof filters>, all: true): Transaction[];
-export function listTransactions(db: Db, input: z.infer<typeof filters>, all?: false): TransactionPage;
-export function listTransactions(db: Db, input: z.infer<typeof filters>, all = false): TransactionPage | Transaction[] {
+export function listTransactions(db: Db, input: z.infer<typeof filters>): Transaction[] {
   const clauses: string[] = [];
   const bind: Record<string, string | number> = {};
   const add = (field: string, sql: string, value: string | number | undefined) => {
@@ -63,11 +60,7 @@ export function listTransactions(db: Db, input: z.infer<typeof filters>, all = f
          (SELECT sum(s.amount) FROM splits s JOIN categories sc ON sc.id=s.category_id WHERE s.transaction_id=t.id${categoryMatch}${splitReport}) END`
     : 'NULL';
   const query = `${projection}, ${contribution} AS contribution ${joins} ${where} ORDER BY ${sort}`;
-  if (all) return (db.prepare(query).all(bind) as Transaction[]).map(uiRow);
-  const { total } = db.prepare(`SELECT count(*) AS total ${joins} ${where}`).get(bind) as { total: number };
-  const rows = (db.prepare(query + ' LIMIT @limit OFFSET @offset')
-    .all({ ...bind, limit: pageSize, offset: pageSize * input.page }) as Transaction[]).map(uiRow);
-  return { rows, total, size: pageSize };
+  return (db.prepare(query).all(bind) as Transaction[]).map(uiRow);
 }
 
 export function transactionDetail(db: Db, id: string): TransactionDetail {
