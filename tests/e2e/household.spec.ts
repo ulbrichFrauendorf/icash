@@ -197,10 +197,14 @@ test('reviews OpenAI classifications and imported rules before saving', async ()
     await rules.getByRole('button', { name: 'Save and apply to uncategorized' }).click();
     await expect(page.getByText('Saved 1 rule and categorized 1 imported transaction.')).toBeVisible();
     await nav('Transactions');
-    const cobbler = page.locator('i-table .i-table-virtual-row').filter({
-      has: page.getByRole('button', { name: 'AI classify Synthetic Cobbler' }),
-    });
+    const classifyCobbler = page.getByRole('button', { name: 'AI classify Synthetic Cobbler' });
+    const cobbler = page.locator('i-table .i-table-virtual-row').filter({ has: classifyCobbler });
     await expect(cobbler).toContainText('Shoe Repairs');
+    await classifyCobbler.click();
+    const existingRule = page.getByRole('dialog', { name: 'Apply existing rule' });
+    await expect(existingRule.getByText('Shoe Repairs', { exact: true })).toBeVisible();
+    await existingRule.getByRole('button', { name: 'Apply classification' }).click();
+    await expect(page.getByText('Existing rule applied.')).toBeVisible();
   } finally {
     await app.close();
     rmSync(root, { recursive: true, force: true });

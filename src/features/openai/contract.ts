@@ -18,7 +18,7 @@ export type SuggestedCategory = {
   label: string;
   kind: 'expense' | 'income';
 };
-export type AiClassification = { token: string; category: SuggestedCategory; reason: string };
+export type AiClassification = { token: string; category: SuggestedCategory; reason: string; ruleId?: string };
 export type AiRule = {
   index: number;
   match: string;

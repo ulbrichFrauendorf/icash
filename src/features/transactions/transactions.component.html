@@ -400,7 +400,8 @@
     </i-dialog>
   }
   @if (aiDraft(); as draft) {
-    <i-dialog header="Confirm AI classification" width="34rem" [visible]="true" [closable]="!ui.busy()"
+    <i-dialog [header]="draft.proposal.ruleId ? 'Apply existing rule' : 'Confirm AI classification'"
+      width="34rem" [visible]="true" [closable]="!ui.busy()"
       (visibleChange)="!$event && aiDraft.set(null)">
       <div class="stack">
         <p><strong>{{ draft.row.description }}</strong></p>

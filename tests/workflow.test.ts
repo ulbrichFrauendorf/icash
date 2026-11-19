@@ -361,6 +361,49 @@ it('rejects unsuccessful OpenAI responses without storing the failed key', async
   expect(ai.status().connected).toBe(false);
 });
 
+it('uses matching rules before requesting or saving AI categories', async () => {
+  const main = account();
+  const card = account('Card', 'credit-card');
+  const header = 'Date,Description,Amount,Balance\n';
+  await importFile(file('main.csv', header + '20250501,Synthetic Bakery,-20.00,80.00'), main.id);
+  await importFile(file('card.csv', header + '20250502,Synthetic Bakery,-21.00,79.00'), card.id);
+  const groceries = category('Supermarkets');
+  const conditions = { field: 'description', direction: 'debit' } as const;
+  saveRule(db(), { name: 'Bakery on main', categoryId: groceries.id, priority: 1, enabled: true,
+    conditions: { ...conditions, operator: 'contains', text: 'BAKERY', accountId: main.id } });
+  const matched = transactions().find((row) => row.accountId === main.id)!;
+  const unmatched = transactions().find((row) => row.accountId === card.id)!;
+  const requests: number[] = [];
+  const ai = new AiCategorization(store, {
+    test: async () => {},
+    suggest: async (_, samples) => {
+      requests.push(samples.length);
+      return samples.map(({ index }) => ({ index, category: null, newExpense: 'Bakery Visits', reason: '' }));
+    },
+  });
+
+  const existing = await ai.suggestTransaction(matched.id);
+  expect(existing.category.id).toBe(groceries.id);
+  expect(requests).toEqual([]);
+  expect(transactionDetail(db(), matched.id).categoryId).toBeNull();
+
+  await ai.connect('sk-icash-synthetic-key');
+  const rules = await ai.suggestRules();
+  expect(rules.rules[0]?.samples).toBe(1);
+  const matchingDraft = await ai.suggestTransaction(matched.id);
+  expect(ai.applyTransaction(matchingDraft.token)).toMatchObject({ categoryId: groceries.id, classification: 'rule', rule: 'Bakery on main' });
+  const draft = await ai.suggestTransaction(unmatched.id);
+  expect(requests).toEqual([1, 1]);
+  saveRule(db(), { name: 'Bakery across accounts', categoryId: groceries.id, priority: 2, enabled: true,
+    conditions: { ...conditions, operator: 'equals', text: 'SYNTHETIC BAKERY' } });
+
+  expect(() => ai.applyTransaction(draft.token)).toThrow(/matching rule changed/);
+  expect(ai.applyRules(rules.token, [{ index: rules.rules[0]!.index, choice: 'suggested' }], true)).toMatchObject({ created: 0 });
+  expect(categories(db()).some((entry) => entry.name === 'Bakery Visits')).toBe(false);
+  expect((await ai.suggestRules()).rules).toHaveLength(0);
+  expect(requests).toEqual([1, 1]);
+});
+
 it('reviews only new uncategorized statement rows and saves consistent overrides atomically', async () => {
   const main = account();
   const groceries = category('Supermarkets');

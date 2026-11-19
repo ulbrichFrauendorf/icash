@@ -177,13 +177,28 @@ export class AiCategorization {
     const profile = this.profiles.active();
     this.transaction = undefined;
     const { transaction, kind } = transactionForAi(profile.db, id);
-    const description = safeDescription(transaction.merchant || transaction.description);
-    if (!description) throw new UserError('This transaction has no usable merchant or description for AI classification.');
-    const { answers, available, all, parents } = await this.request(profile, [{ index: 0, description, kind, direction: direction(transaction.amount) }]);
-    const answer = answers.find((item) => item.index === 0);
-    const category = answer && proposal(answer, kind, available, all, parents);
-    if (!category || !answer) throw new UserError('OpenAI could not suggest a category confidently. Use the transaction editor to choose one.');
-    const value = { token: randomUUID(), category, reason: answer.reason };
+    let match = categorizer(profile.db)(transaction);
+    let category: SuggestedCategory | null | undefined;
+    let reason = '';
+    if (!match.ruleId) {
+      const description = safeDescription(transaction.merchant || transaction.description);
+      if (!description) throw new UserError('This transaction has no usable merchant or description for AI classification.');
+      const { answers, available, all, parents } = await this.request(profile, [{ index: 0, description, kind, direction: direction(transaction.amount) }]);
+      const answer = answers.find((item) => item.index === 0);
+      category = answer && proposal(answer, kind, available, all, parents);
+      reason = answer?.reason ?? '';
+      match = categorizer(profile.db)(transaction);
+    }
+    if (match.ruleId) {
+      const all = categories(profile.db);
+      const target = all.find((entry) => entry.id === match.categoryId && entry.kind === kind);
+      if (!target) throw new UserError('An existing rule matches this transaction with a different treatment. Apply it from the Rules page.');
+      const parents = new Map(all.map((entry) => [entry.id, entry.name]));
+      category = { id: target.id, name: target.name, label: categoryLabel(target, parents), kind };
+      reason = 'An existing rule matches this transaction.';
+    }
+    if (!category) throw new UserError('OpenAI could not suggest a category confidently. Use the transaction editor to choose one.');
+    const value = { token: randomUUID(), category, reason, ruleId: match.ruleId ?? undefined };
     this.transaction = { db: profile.db, value: { ...value, id, fingerprint: fingerprint(transaction) } };
     return value;
   }
@@ -198,6 +213,16 @@ export class AiCategorization {
       if (kind !== value.category.kind || fingerprint(transaction) !== value.fingerprint) {
         throw new UserError('This transaction changed after the suggestion. Request a new suggestion.');
       }
+      const match = categorizer(db)(transaction);
+      if ((match.ruleId ?? undefined) !== value.ruleId ||
+          (match.ruleId && (match.categoryId !== value.category.id || match.treatment !== kind))) {
+        throw new UserError('The matching rule changed after the suggestion. Request a new suggestion.');
+      }
+      if (match.ruleId) {
+        db.prepare("UPDATE transactions SET category_id=?,classification='rule',rule_id=? WHERE id=?")
+          .run(match.categoryId, match.ruleId, transaction.id);
+        return transactionDetail(db, transaction.id);
+      }
       return saveTransaction(db, { ...transaction, categoryId: categoryId(db, value.category), confirmClassification: true });
     }).immediate();
     this.transaction = undefined;
@@ -208,7 +233,8 @@ export class AiCategorization {
     const profile = this.profiles.active();
     this.rules = undefined;
     const rows = profile.db.prepare(eligibleSql + ' ORDER BY t.date DESC,t.id LIMIT 500').all() as PostedRow[];
-    const rules = await this.suggestForRows(rows);
+    const classify = categorizer(profile.db);
+    const rules = await this.suggestForRows(rows.filter((row) => !classify(row).categoryId));
     this.rules = { db: profile.db, value: { token: randomUUID(), rules } };
     return this.rules.value;
   }
@@ -254,7 +280,9 @@ export class AiCategorization {
     const rules = pending.value.rules.filter((rule) => selection.has(rule.index));
     if (!rules.length || rules.length !== selection.size) throw new UserError('Select valid rule suggestions.');
     const result = db.transaction(() => {
+      const existing = new Set(listRules(db).map((rule) => conditionKey(rule.conditions)));
       const approvals = rules.flatMap((rule) => {
+        if (existing.has(patternKey(rule))) return [];
         const id = resolveCategoryChoice(db, selection.get(rule.index) ?? '', rule.category.kind, rule.category);
         return id ? [{ pattern: rule, categoryId: id }] : [];
       });

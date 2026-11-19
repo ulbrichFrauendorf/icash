@@ -132,7 +132,7 @@ export class TransactionsPage {
       this.aiDraft.set(null);
       this.categories.set(await this.ui.api.categories());
       await this.reload();
-    }, 'AI category saved.');
+    }, proposal.ruleId ? 'Existing rule applied.' : 'AI category saved.');
   }
   futureRule(row: TransactionDetail) {
     const categoryId = row.categoryId;
