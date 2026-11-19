@@ -157,10 +157,10 @@ export function registerHandlers(profiles: ProfileStore, window: () => BrowserWi
     const rows = imports.uncategorized(profile.db, profile.id, token, preview.version);
     if (!rows.length) return preview;
     const connected = ai.status().connected;
-    let suggestions: Awaited<ReturnType<typeof ai.suggestForRows>> = [];
+    let suggestions: Awaited<ReturnType<typeof ai.suggestForRows>>['suggestions'] = new Map();
     let notice = connected ? undefined : 'Connect OpenAI in Settings for suggestions. You can choose categories here.';
     if (connected) {
-      try { suggestions = await ai.suggestForRows(rows); }
+      try { ({ suggestions, notice } = await ai.suggestForRows(rows, true)); }
       catch (error) {
         if (!(error instanceof UserError)) throw error;
         notice = error.message + ' You can choose categories here.';

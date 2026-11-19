@@ -19,8 +19,9 @@ type Profile = ReturnType<ProfileStore['active']>;
 export type RuleEvidence = { description: string; amount: number; treatment: 'expense' | 'income' };
 type PostedRow = Classifiable & RuleEvidence & { id: string };
 type RulePattern = Pick<AiRule, 'name' | 'match' | 'direction'> & { sourceMatch: string };
-type RuleSample = ModelSample & RulePattern & { samples: number };
+type RuleSample = { key: string; description: string; kind: ModelSample['kind']; direction: ModelSample['direction']; pattern: RulePattern | null; samples: number };
 export type RuleSuggestion = AiRule & Pick<RulePattern, 'sourceMatch'>;
+export type ReviewSuggestion = { category: SuggestedCategory; rule?: RuleSuggestion };
 type Pending<T> = { db: Db; value: T };
 
 const eligibleSql = `SELECT t.id,t.account_id AS accountId,t.description,t.merchant,t.amount,t.treatment
@@ -88,6 +89,14 @@ export function rulePattern(row: RuleEvidence): RulePattern | null {
   return pattern && row.treatment === (row.amount < 0 ? 'expense' : 'income')
     ? { ...pattern, sourceMatch: pattern.match, direction: direction(row.amount) }
     : null;
+}
+
+export function reviewSample(row: RuleEvidence) {
+  const description = safeDescription(row.description);
+  const pattern = rulePattern(row);
+  const flow = direction(row.amount);
+  return { description, pattern, direction: flow, kind: row.treatment,
+    key: JSON.stringify([flow, row.treatment, description, pattern?.sourceMatch]) };
 }
 
 export const patternKey = (rule: Parameters<typeof ruleConditions>[0]) => conditionKey(ruleConditions(rule));
@@ -246,64 +255,76 @@ export class AiCategorization {
     this.rules = undefined;
     const rows = profile.db.prepare(eligibleSql + ' ORDER BY t.date DESC,t.id LIMIT 500').all() as PostedRow[];
     const classify = categorizer(profile.db);
-    const rules = await this.suggestForRows(rows.filter((row) => !classify(row).categoryId));
+    const { suggestions } = await this.suggestForRows(rows.filter((row) => !classify(row).categoryId));
+    const rules = [...suggestions.values()].flatMap(({ rule }) => rule ? [rule] : []);
     this.rules = { db: profile.db, value: { token: randomUUID(), rules } };
     return this.rules.value;
   }
 
-  async suggestForRows(rows: RuleEvidence[]): Promise<RuleSuggestion[]> {
+  async suggestForRows(rows: RuleEvidence[], forImport = false) {
     const profile = this.profiles.active();
+    const epoch = this.epoch;
     const existing = new Set(listRules(profile.db).map((rule) => conditionKey(rule.conditions)));
+    const hasIncome = categories(profile.db).some((category) => category.kind === 'income' && category.leaf && !category.archived);
     const grouped = new Map<string, RuleSample>();
-    const evidence = new Map<string, { description: string; match: string | undefined; direction: RulePattern['direction'] }>();
+    const evidence = new Map<string, { description: string; key: string; direction: RulePattern['direction'] }>();
     for (const row of rows) {
-      const sample = rulePattern(row);
+      const sample = reviewSample(row);
       const source = normalizeText(row.description);
-      const flow = direction(row.amount);
-      evidence.set(JSON.stringify([flow, source]), { description: source, match: sample?.match, direction: flow });
-      const description = sample && safeDescription(sample.match);
-      if (!sample || !description) continue;
-      const key = patternKey(sample);
-      if (existing.has(key)) continue;
-      const group = grouped.get(key);
+      evidence.set(JSON.stringify([sample.direction, source]), { description: source, key: sample.key, direction: sample.direction });
+      if (!sample.description || row.amount === 0 || (row.treatment === 'income' && !hasIncome)) continue;
+      if (!forImport && (!sample.pattern || existing.has(patternKey(sample.pattern)))) continue;
+      const group = grouped.get(sample.key);
       if (group) group.samples++;
-      else grouped.set(key, { ...sample, description, kind: row.treatment, index: 0, samples: 1 });
+      else grouped.set(sample.key, { ...sample, samples: 1 });
     }
-    const samples = [...grouped.values()].sort((a, b) => b.samples - a.samples).slice(0, limit)
-      .map((sample, index) => ({ ...sample, index }));
-    if (!samples.length) return [];
-    const payload = samples.map(({ index, description, kind, direction }) => ({ index, description, kind, direction }));
-    const { answers, available, all, parents } = await this.request(profile, payload, true);
+    const ranked = [...grouped.values()].sort((a, b) => b.samples - a.samples);
+    const samples = forImport ? ranked : ranked.slice(0, limit);
+    const suggestions = new Map<string, ReviewSuggestion>();
     const matchingRows = ledgerMatches(profile.db);
     const descriptions = [...evidence.values()];
-    const overlaps = (sample: RuleSample, match: string) =>
-      descriptions.some((row) => row.direction === sample.direction && row.match !== sample.match && row.description.includes(match)) ||
-      overlapsLedger(matchingRows, { ...sample, match });
-    const used = new Set<number>();
-    const proposed = new Set<string>();
-    const rules: RuleSuggestion[] = [];
-    for (const answer of answers) {
-      const sample = samples[answer.index];
-      if (!sample || used.has(sample.index)) continue;
-      const category = proposal(answer, sample.kind, available, all, parents);
-      if (!category) continue;
-      used.add(sample.index);
-      const shorter = answer.ruleMatch && shorterMatch(answer.ruleMatch, sample.match);
-      let match = shorter || sample.match;
-      if (overlaps(sample, match)) {
-        if (match === sample.match || overlaps(sample, sample.match)) continue;
-        match = sample.match;
+    const canMatch = (sample: RuleSample, pattern: RulePattern) =>
+      !descriptions.some((row) => row.direction === pattern.direction && row.key !== sample.key && row.description.includes(pattern.match)) &&
+      !overlapsLedger(matchingRows, pattern);
+    let notice: string | undefined;
+    for (let start = 0; start < samples.length; start += limit) {
+      const batch = samples.slice(start, start + limit);
+      const payload = batch.map(({ description, kind, direction }, index) => ({ index, description, kind, direction }));
+      let response;
+      try {
+        response = await this.request(profile, payload, true);
+      } catch (error) {
+        this.ensureCurrent(profile, epoch);
+        if (!forImport || start === 0 || !(error instanceof UserError)) throw error;
+        notice = error.message + ' Earlier suggestions are available for review.';
+        break;
       }
-      const key = patternKey({ match, direction: sample.direction });
-      if (existing.has(key) || proposed.has(key)) continue;
-      proposed.add(key);
-      const name = answer.ruleName && /^[\p{L}\p{N}][\p{L}\p{N}\p{M} &'’().,-]*$/u.test(answer.ruleName)
-        && (normalizeText(answer.ruleName) !== sample.description || normalizeText(sample.name) === sample.description)
-        ? answer.ruleName : sample.name;
-      rules.push({ index: sample.index, name, match, sourceMatch: sample.sourceMatch, operator: 'contains', direction: sample.direction,
-        samples: sample.samples, category, reason: answer.reason });
+      for (const answer of response.answers) {
+        const sample = batch[answer.index];
+        if (!sample || suggestions.has(sample.key)) continue;
+        const category = proposal(answer, sample.kind, response.available, response.all, response.parents);
+        if (!category) continue;
+        const suggestion: ReviewSuggestion = { category };
+        suggestions.set(sample.key, suggestion);
+        const pattern = sample.pattern;
+        if (!pattern || answer.ruleMatch === null) continue;
+        const shorter = answer.ruleMatch && shorterMatch(answer.ruleMatch, pattern.match);
+        let match = shorter || pattern.match;
+        if (!canMatch(sample, { ...pattern, match })) {
+          if (match === pattern.match || !canMatch(sample, pattern)) continue;
+          match = pattern.match;
+        }
+        const key = patternKey({ match, direction: pattern.direction });
+        if (existing.has(key)) continue;
+        existing.add(key);
+        const name = answer.ruleName && /^[\p{L}\p{N}][\p{L}\p{N}\p{M} &'’().,-]*$/u.test(answer.ruleName)
+          && (normalizeText(answer.ruleName) !== sample.description || normalizeText(pattern.name) === sample.description)
+          ? answer.ruleName : pattern.name;
+        suggestion.rule = { ...pattern, index: answer.index, name, match, operator: 'contains', samples: sample.samples,
+          category, reason: answer.reason };
+      }
     }
-    return rules;
+    return { suggestions, notice };
   }
 
   applyRules(token: string, selected: { index: number; choice: CategoryChoice }[], applyToImported: boolean) {

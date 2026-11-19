@@ -10,7 +10,7 @@ import { UserError } from '../../shared/schema';
 import { categorizer } from '../categorization/main';
 import { mapping as mappingSchema, type AuditRow, type Batch, type Candidate, type FilePreview, type ImportPreview, type ImportReviewRow, type ImportReview, type ImportResult, type Mapping, type RowPreview, type commitInput, type decodeInput } from './contract';
 import type { CategoryChoice } from '../openai/contract';
-import { patternKey, resolveCategoryChoice, rulePattern, saveApprovedRules, type RuleSuggestion } from '../openai/main';
+import { patternKey, resolveCategoryChoice, reviewSample, rulePattern, saveApprovedRules, type ReviewSuggestion } from '../openai/main';
 import { statementLimit } from './contract';
 import { matchKey, normalizeRow, suggestFormats, suggestMapping } from './domain';
 
@@ -261,17 +261,17 @@ export class Imports {
     });
   }
 
-  setReview(profileId: string, token: string, version: string, rows: ImportReviewRow[], rules: RuleSuggestion[], notice?: string): ImportReview {
+  setReview(profileId: string, token: string, version: string, rows: ImportReviewRow[], suggestions: ReadonlyMap<string, ReviewSuggestion>, notice?: string): ImportReview {
     const { preview } = this.currentPreview(profileId, token, version);
-    const byPattern = new Map(rules.map((rule) => [patternKey({ match: rule.sourceMatch, direction: rule.direction }), rule]));
     const patterns = new Map<number, ReviewPattern>();
     let suggested = 0;
     const reviewed = new Map(rows.map((row) => {
-      const pattern = rulePattern(row);
-      const rule = pattern ? byPattern.get(patternKey(pattern)) : undefined;
-      if (pattern) patterns.set(row.row, rule ?? pattern);
-      if (rule) suggested++;
-      return [row.row, { ...row, suggestion: rule?.category }];
+      const sample = reviewSample(row);
+      const suggestion = suggestions.get(sample.key);
+      const pattern = suggestion ? suggestion.rule : sample.pattern;
+      if (pattern) patterns.set(row.row, pattern);
+      if (suggestion) suggested++;
+      return [row.row, { ...row, suggestion: suggestion?.category }];
     }));
     preview.review = { rows: reviewed, patterns };
     return { rows: [...reviewed.values()], suggested, notice };

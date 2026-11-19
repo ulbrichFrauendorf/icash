@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { AiCategorization } from '../src/features/openai/main';
+import { AiCategorization, reviewSample } from '../src/features/openai/main';
 import { OpenAiClient } from '../src/features/openai/client';
 import { confirmCoverage, saveAccount } from '../src/features/accounts/main';
 import { exportBackup, restoreBackup } from '../src/features/backup-restore/main';
@@ -449,6 +449,56 @@ it('names AI rules and keeps a longer match when shortening would overlap anothe
   expect(transaction(laterFee)).toMatchObject({ categoryId: category('Test Expenses').id, classification: 'rule' });
 });
 
+it('reviews a full statement in batches and proposes expenses for an empty household', async () => {
+  store.create('Empty household', false);
+  const bank = account();
+  const merchants = Array.from('ABCDEFGHIJKLMNOPQRSTUVWX', (letter) => ['MARKET ' + letter, 'Supermarkets']);
+  merchants.push(['OVERSEAS PURCHASE (EFFEC 02052025) MUSIC STREAM CARD NO. 4567', 'Streaming'],
+    ['ACB DEBIT:EXTERNAL MOBILECO 12345678 PRIVATE34567', 'Mobile Phones'],
+    ['SHOP 12345678 GARDEN SERVICE', 'Gardening']);
+  const statement = file('empty-household.csv', ['Date,Description,Amount',
+    ...merchants.map(([description]) => '20250502,' + description + ',-2.50'),
+    '20250503,MARKET A,-5.50', '20250503,UNKNOWN CREDIT,5.00', '20250503,NOTIFYME,0.00',
+  ].join('\n'));
+  const { token, statement: previewed } = await preview(statement, bank.id);
+  const rows = imports.uncategorized(db(), active().id, token, previewed.version);
+  const sizes: number[] = [];
+  const client = new OpenAiClient(async (_, init) => {
+    if (init?.method === 'GET') return Response.json({});
+    const body = JSON.parse(String(init?.body));
+    const { samples, categories: choices } = JSON.parse(body.input) as {
+      samples: { index: number; description: string }[]; categories: unknown[];
+    };
+    expect(choices).toEqual([]);
+    expect(body.text.format.schema.properties.suggestions.items.properties.category).toEqual({ type: 'null' });
+    expect(body.input).not.toMatch(/4567|02052025|UNKNOWN CREDIT|NOTIFYME/);
+    expect(samples.map(({ index }) => index)).toEqual(samples.map((_, i) => i));
+    sizes.push(samples.length);
+    const suggestions = samples.map(({ index, description }) => {
+      const category = description.startsWith('MARKET') ? 'Supermarkets' : ({
+        'MUSIC STREAM': 'Streaming', 'ACB DEBIT EXTERNAL MOBILECO': 'Mobile Phones', 'SHOP GARDEN SERVICE': 'Gardening',
+      } as Record<string, string>)[description];
+      expect(category).toBeDefined();
+      return { index, category: null, newExpense: category, reason: 'Spending purpose.',
+        ruleName: category, ruleMatch: description };
+    });
+    return Response.json({ status: 'completed', output: [{ type: 'message',
+      content: [{ type: 'output_text', text: JSON.stringify({ suggestions }) }] }] });
+  });
+  const ai = new AiCategorization(store, client);
+  await ai.connect('sk-icash-synthetic-key');
+  const { suggestions } = await ai.suggestForRows(rows, true);
+  expect(sizes).toEqual([24, 3]);
+  const review = imports.setReview(active().id, token, previewed.version, rows, suggestions);
+  expect(review.suggested).toBe(28);
+  expect(categories(db())).toHaveLength(0);
+  imports.commit(db(), active().id, { token, version: previewed.version, acceptRejected: false,
+    review: { changes: [], saveRules: true } });
+  expect(categories(db()).map(({ name }) => name).sort()).toEqual(['Gardening', 'Mobile Phones', 'Streaming', 'Supermarkets']);
+  expect(transaction('SHOP 12345678 GARDEN SERVICE').categoryId).toBe(category('Gardening').id);
+  expect(listRules(db()).some((rule) => rule.categoryId === category('Gardening').id)).toBe(false);
+});
+
 it('rejects unsuccessful OpenAI responses without storing the failed key', async () => {
   const ai = new AiCategorization(store, new OpenAiClient(async () => new Response('ignored', { status: 401 })));
   await expect(ai.connect('sk-icash-synthetic-key')).rejects.toThrow(/rejected the API key/);
@@ -514,11 +564,13 @@ it('reviews only new uncategorized statement rows and saves consistent overrides
   const statement = imports.preview(db(), active().id, token, mappingSchema.parse({ ...suggested, delimiter, encoding, header }));
   const rows = imports.uncategorized(db(), active().id, token, statement.version);
   expect(rows.map(({ row }) => row)).toEqual([3, 4]);
-  const reviewed = imports.setReview(active().id, token, statement.version, rows, [{
+  const rule = {
     index: 0, name: 'Synthetic Shop', match: 'SYNTHETIC SHOP', sourceMatch: 'SYNTHETIC SHOP RIVONIA',
     operator: 'contains', direction: 'debit', samples: 2, reason: '',
     category: { id: fuel.id, label: fuel.name, name: fuel.name, kind: 'expense' },
-  }]);
+  } as const;
+  const reviewed = imports.setReview(active().id, token, statement.version, rows,
+    new Map([[reviewSample(rows[0]!).key, { category: rule.category, rule }]]));
   expect(reviewed.suggested).toBe(2);
   const result = imports.commit(db(), active().id, { token, version: statement.version, acceptRejected: false,
     review: { changes: [{ row: 3, choice: groceries.id }, { row: 4, choice: groceries.id }], saveRules: true } });

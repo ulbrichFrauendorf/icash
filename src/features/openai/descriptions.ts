@@ -1,25 +1,31 @@
 import { normalizeText } from '../../shared/finance';
 
-export function safeDescription(description: string): string {
+function statementText(description: string): string {
   return normalizeText(description)
+    .replace(/^(?:POS|OVERSEAS) PURCHASE (?:\(EFF(?:EC(?:TIVE)?)?\b[^)]*\) )?/, '')
+    .replace(/\s+CARD (?:NO|NUMBER)\b.*$/, '');
+}
+
+export function safeDescription(description: string): string {
+  return statementText(description)
     .replace(/\((?:EFF(?:EC(?:TIVE)?)?|AMT)\b[^)]*\)/g, ' ')
     .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/g, ' ')
     .replace(/\b(?:ACCOUNT|ACCT|A\/C|REF(?:ERENCE)?|CARD|TRACE|AUTH)\s*(?:NO|NUMBER|#)?\s*[:#-]?\s*[A-Z-]*\d[\w./-]*/g, ' ')
-    .replace(/\b[A-Z]*\d[\d A-Z./-]*\d[A-Z]*\b/g, ' ')
-    .replace(/\b[\w-]*\d[\w-]*\b/g, ' ')
+    .replace(/\b[\w./-]*\d[\w./-]*\b/g, ' ')
     .replace(/[^\p{L}& -]/gu, ' ')
     .replace(/\s+/g, ' ').trim().slice(0, 120).trim();
 }
 
 export function ruleMatch(description: string): { name: string; match: string } | null {
-  const match = normalizeText(description)
-    .replace(/^POS PURCHASE (?:\(EFF(?:EC(?:TIVE)?)?\b[^)]*\) )?/, '')
-    .split(/\s+(?:\((?:EFF(?:EC(?:TIVE)?)?|AMT)\b|(?:CARD|ACCOUNT|ACCT|REF(?:ERENCE)?|TRACE|AUTH)\s+(?:NO\b|NUMBER\b|#|[A-Z-]*\d))/, 1)[0]!
-    .replace(/\s+\d{4,}$/, '').trim();
+  const detail = statementText(description)
+    .split(/\s+(?:\((?:EFF(?:EC(?:TIVE)?)?|AMT)\b|(?:CARD|ACCOUNT|ACCT|REF(?:ERENCE)?|TRACE|AUTH)\s+(?:NO\b|NUMBER\b|#|[A-Z-]*\d))/, 1)[0]!;
+  const match = detail.replace(/\s+\S*\d{4,}.*$/, '').trim();
+  if (safeDescription(detail.slice(match.length))) return null;
   const summary = safeDescription(match)
     .replace(/^DIGITAL PAYMENT (?:DT|CR) ABSA BANK /, '')
     .replace(/^(TRANSACTION FEE DECL) POS TRAN FEE$/, '$1');
-  if (!/\p{L}{3}/u.test(summary) || match.length > 200 || /\d{4,}|@/.test(match)) return null;
+  if (!/\p{L}{3}/u.test(summary) || match.length > 200 || /\d{4,}|@/.test(match) ||
+      /^(?:ACB (?:DEBIT|CREDIT)(?: EXTERNAL)?|DIGITAL TRANSF (?:DT|CR)|TRANSACTION FEE|POS CARD REFUND)$/.test(summary)) return null;
   const name = summary.toLowerCase().replace(/(^|[ -])\p{L}/gu, (initial) => initial.toUpperCase());
   return { name: name.slice(0, 80).trimEnd(), match };
 }
