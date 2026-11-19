@@ -25,6 +25,8 @@ import { entryInput, goalInput } from '../../features/savings-goals/contract';
 import { goals, goalTransfers, removeEntry, saveEntry, saveGoal } from '../../features/savings-goals/main';
 import { filters, transactionInput } from '../../features/transactions/contract';
 import { listTransactions, saveTransaction, transactionDetail } from '../../features/transactions/main';
+import { applyAiRulesInput, openAiKeyInput } from '../../features/openai/contract';
+import { AiCategorization } from '../../features/openai/main';
 import { candidateInput, pairInput } from '../../features/transfers/contract';
 import { pairTransfer, transferCandidates, unlinkTransfer } from '../../features/transfers/main';
 import type { IpcResult, Requests } from '../../shared/api';
@@ -39,6 +41,7 @@ const rulePreview = z.object({
 export function registerHandlers(profiles: ProfileStore, window: () => BrowserWindow | null, appUrl: string, dataRoot: string) {
   const imports = new Imports();
   const templates = new Templates();
+  const ai = new AiCategorization(profiles);
   const active = () => profiles.active();
   const db = () => active().db;
 
@@ -97,8 +100,17 @@ export function registerHandlers(profiles: ProfileStore, window: () => BrowserWi
   function changeProfile<T>(operation: () => T): T {
     imports.clear();
     templates.clear();
+    ai.clear();
     return operation();
   }
+
+  handle('openAiStatus', empty, () => ai.status());
+  handle('connectOpenAi', openAiKeyInput, ({ key }) => ai.connect(key));
+  handle('disconnectOpenAi', empty, () => ai.disconnect());
+  handle('suggestAiCategory', profileIdInput, ({ id }) => ai.suggestTransaction(id));
+  handle('applyAiCategory', profileIdInput, ({ id }) => ai.applyTransaction(id));
+  handle('suggestAiRules', empty, () => ai.suggestRules());
+  handle('applyAiRules', applyAiRulesInput, ({ token, selected, applyToImported }) => ai.applyRules(token, selected, applyToImported));
 
   handle('getProfiles', empty, () => profiles.state());
   handle('createProfile', createProfileInput, (input) => changeProfile(() => profiles.create(input.name, input.seed)));

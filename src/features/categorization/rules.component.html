@@ -4,6 +4,9 @@
       <h1>Categorization rules</h1>
       <p>Define how iCash classifies future transactions.</p>
     </div>
+    <i-button icon="pi pi-sparkles" [disabled]="ui.busy()" (clicked)="suggestRules()">
+      Suggest rules with AI
+    </i-button>
   </div>
   <div class="split-grid">
     <i-card class="surface">
@@ -226,4 +229,32 @@
       </i-card>
     </div>
   </div>
+  @if (aiDraft(); as draft) {
+    <i-dialog header="Review AI rule suggestions" width="46rem" [visible]="true" [closable]="!ui.busy()"
+      (visibleChange)="!$event && aiDraft.set(null)">
+      <div class="stack">
+        <p>Select rules to save. Each selected rule applies to future matches. Any marked expense category will be created when you confirm.</p>
+        @for (rule of draft.rules; track rule.index) {
+          <div class="list-row">
+            <div>
+              <i-checkbox [label]="(rule.operator === 'contains' ? 'Contains ' : 'Exactly matches ') + rule.match"
+                [ngModel]="selectedRules().has(rule.index)" (ngModelChange)="selectRule(rule.index, $event)" />
+              <p>{{ rule.direction }} · {{ rule.samples }} sample(s) · {{ rule.category.id ? 'Use ' : 'Create expense category ' }}{{ rule.category.label }}</p>
+              @if (rule.reason) {
+                <p class="muted">{{ rule.reason }}</p>
+              }
+            </div>
+          </div>
+        }
+        <i-checkbox label="Also apply to matching uncategorized imported transactions" [(ngModel)]="applyToImported" />
+        @if (ui.error(); as error) {
+          <i-message severity="danger">{{ error }}</i-message>
+        }
+      </div>
+      <div slot="footer" class="actions">
+        <i-button severity="secondary" [outlined]="true" [disabled]="ui.busy()" (clicked)="aiDraft.set(null)">Cancel</i-button>
+        <i-button [disabled]="ui.busy() || !selectedRules().size" (clicked)="saveAiRules(draft)">Save selected rules</i-button>
+      </div>
+    </i-dialog>
+  }
 </div>

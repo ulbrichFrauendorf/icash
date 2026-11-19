@@ -35,6 +35,14 @@ On Windows, run `npm run make` and install the generated Squirrel setup executab
 
 On Windows, open `%APPDATA%\iCash` to locate application data. Profiles under `profiles/` contain the encrypted ledger and an OS-protected key. A copied ledger requires its original key. Use portable backup export for migration or recovery. People sharing an unlocked OS account have access to its iCash profiles. CSV and JSON exports are ordinary files and should be stored accordingly. Close iCash before making a manual file copy. Keep a backup before uninstalling.
 
+## Optional OpenAI categorization
+
+Open **Settings → OpenAI**, enter a project API key, and choose **Verify and connect**. iCash protects the key with the operating system key store for the active household. Portable backups omit the key, so reconnect OpenAI after restoring a household.
+
+In **Rules**, choose **Suggest rules with AI** to review patterns from uncategorized imported transactions. Approve the rules and any accompanying expense categories you want. You can also apply the approved rules to matching uncategorized transactions already in the ledger. In **Transactions**, select the pencil to edit in a modal or the sparkle icon to confirm a one-off AI classification.
+
+AI requests use the OpenAI API and can incur charges. iCash sends cleaned merchant or transaction descriptions, debit or credit direction, and category names when you request suggestions. It leaves amounts, balances, notes, and raw statement rows on the device. Manual categorization, existing rules, and statement imports work offline.
+
 ## Project layout
 
 `src/features/` contains vertical slices with contracts, Electron handlers, domain logic, and standalone Angular components as needed. `src/app/` wires Electron, preload, and Angular together. `src/platform/main/` owns encrypted SQLite and migrations, and `src/shared/` owns the common finance and IPC contracts. New import sources can feed the same normalized transaction shape used by the CSV slice.

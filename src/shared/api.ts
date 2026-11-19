@@ -5,6 +5,7 @@ import type { TemplatePreview } from '../features/categories/portable';
 import type { merchantInput, Rule, RulePreview, saveRuleInput } from '../features/categorization/contract';
 import type { AuditRow, Batch, commitInput, decodeInput, FilePreview, ImportPreview, ImportResult, previewInput } from '../features/import-statement/contract';
 import type { allocationInput, Budget, closeInput, copyInput, defaultInput, Recommendations } from '../features/monthly-budget/contract';
+import type { AiClassification, AiRules, AiStatus, applyAiRulesInput, openAiKeyInput } from '../features/openai/contract';
 import type { createProfileInput, ProfileState, selectThemeInput } from '../features/profiles/contract';
 import type { Schedule, scheduleInput } from '../features/recurring/contract';
 import type { Report, reportInput } from '../features/reports/contract';
@@ -21,6 +22,13 @@ export interface Requests {
   createProfile: [Data<typeof createProfileInput>, ProfileState];
   selectProfile: [ID, ProfileState];
   deleteProfile: [ID, ProfileState];
+  openAiStatus: [undefined, AiStatus];
+  connectOpenAi: [Data<typeof openAiKeyInput>, AiStatus];
+  disconnectOpenAi: [undefined, AiStatus];
+  suggestAiCategory: [ID, AiClassification];
+  applyAiCategory: [ID, TransactionDetail];
+  suggestAiRules: [undefined, AiRules];
+  applyAiRules: [Data<typeof applyAiRulesInput>, { rules: Rule[]; created: number; classified: number }];
   setTheme: [Data<typeof selectThemeInput>, ProfileState];
   accounts: [undefined, Account[]];
   saveAccount: [Data<typeof saveAccountInput>, Account[]];
@@ -80,6 +88,8 @@ export type Api = {
 
 export const channels: { [K in keyof Requests]: K } = {
   getProfiles: 'getProfiles', createProfile: 'createProfile', selectProfile: 'selectProfile', deleteProfile: 'deleteProfile',
+  openAiStatus: 'openAiStatus', connectOpenAi: 'connectOpenAi', disconnectOpenAi: 'disconnectOpenAi',
+  suggestAiCategory: 'suggestAiCategory', applyAiCategory: 'applyAiCategory', suggestAiRules: 'suggestAiRules', applyAiRules: 'applyAiRules',
   setTheme: 'setTheme', accounts: 'accounts', saveAccount: 'saveAccount', confirmCoverage: 'confirmCoverage',
   categories: 'categories', saveCategory: 'saveCategory', categoryUsage: 'categoryUsage',
   mergeCategories: 'mergeCategories', restoreDefaults: 'restoreDefaults', exportTemplate: 'exportTemplate',

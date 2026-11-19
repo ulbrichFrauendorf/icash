@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { AiCategorization } from '../src/features/openai/main';
+import { OpenAiClient } from '../src/features/openai/client';
 import { confirmCoverage, saveAccount } from '../src/features/accounts/main';
 import { exportBackup, restoreBackup } from '../src/features/backup-restore/main';
 import { categories, mergeCategories, restoreDefaults, saveCategory } from '../src/features/categories/main';
@@ -275,3 +277,86 @@ it('imports and replays 50,000 rows while returning a bounded preview', async ()
   expect((await importFile(statement, main.id)).inserted).toBe(0);
   expect(listTransactions(db(), filters.parse({})).total).toBe(50000);
 }, 30000);
+
+it('proposes AI categories and rules from redacted statements and writes only after confirmation', async () => {
+  const main = account();
+  const statement = file('ai.csv', [
+    'Date,Description,Amount,Balance,Reference',
+    '20250501,POS PURCHASE (EFFEC 30042025) SYNTHETIC COBBLER,-42.20,1050.00,PRIVATE-2038444',
+    '20250501,POS PURCHASE (EFFEC 01052025) SYNTHETIC COBBLER,-31.80,1018.20,PRIVATE-7245772',
+    '20250502,PRIVATE BAKERY REF 825210880,-20.00,998.20,PRIVATE-7024111',
+    '20250502,MANUAL BAKERY,-10.00,988.20,PRIVATE-0928433',
+  ].join('\n'));
+  await importFile(statement, main.id);
+  const manual = transactionDetail(db(), transaction('MANUAL BAKERY').id);
+  saveTransaction(db(), { ...manual, confirmClassification: true });
+  const key = 'sk-icash-synthetic-key';
+  const outgoing: string[] = [];
+  const client = new OpenAiClient(async (destination, init) => {
+    expect(String(destination)).toMatch(/^https:\/\/api\.openai\.com\/v1\//);
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer ' + key);
+    if (init?.method === 'GET') return Response.json({ id: 'gpt-4.1-mini' });
+    expect(init?.redirect).toBe('error');
+    const body = JSON.parse(String(init?.body));
+    expect(body.store).toBe(false);
+    outgoing.push(body.input);
+    const { samples, categories: choices } = JSON.parse(body.input) as {
+      samples: { index: number; description: string }[];
+      categories: { code: number; name: string }[];
+    };
+    const grocery = choices.find((choice) => choice.name.endsWith('/ Supermarkets'))!;
+    const suggestions = samples.map((sample) => ({
+      index: sample.index, category: sample.description.includes('BAKERY') ? grocery.code : null,
+      newExpense: sample.description.includes('COBBLER') ? 'Shoe Repairs' : null, reason: 'Merchant type.',
+    }));
+    return Response.json({ status: 'completed', output: [{ type: 'message',
+      content: [{ type: 'output_text', text: JSON.stringify({ suggestions }) }] }] });
+  });
+  const ai = new AiCategorization(store, client);
+  expect(ai.status().connected).toBe(false);
+  await expect(ai.suggestTransaction(transaction('PRIVATE BAKERY REF 825210880').id)).rejects.toThrow(/Connect OpenAI/);
+  await ai.connect(key);
+  const profileId = active().id;
+  expect(readFileSync(store.path(profileId, 'openai-key')).includes(key)).toBe(false);
+  store.close();
+  store.select(profileId);
+  expect(ai.status()).toEqual({ connected: true });
+
+  const bakery = transaction('PRIVATE BAKERY REF 825210880');
+  const proposed = await ai.suggestTransaction(bakery.id);
+  expect(proposed.category.name).toBe('Supermarkets');
+  expect(transactionDetail(db(), bakery.id).categoryId).toBeNull();
+  expect(outgoing[0]).toContain('PRIVATE BAKERY');
+  expect(outgoing[0]).not.toMatch(/825210880|PRIVATE-7024111|2025-05|99820|2000|note|accountId/);
+  expect(ai.applyTransaction(proposed.token).classification).toBe('manual');
+
+  const cobbler = transaction('POS PURCHASE (EFFEC 30042025) SYNTHETIC COBBLER');
+  const firstProposal = await ai.suggestTransaction(cobbler.id);
+  expect(firstProposal.category).toMatchObject({ id: null, name: 'Shoe Repairs' });
+  expect(categories(db()).some((entry) => entry.name === 'Shoe Repairs')).toBe(false);
+  db().exec(`CREATE TRIGGER fail_ai_assignment BEFORE UPDATE OF category_id ON transactions
+    BEGIN SELECT raise(ABORT, 'injected classification failure'); END;`);
+  expect(() => ai.applyTransaction(firstProposal.token)).toThrow(/injected classification failure/);
+  expect(categories(db()).some((entry) => entry.name === 'Shoe Repairs')).toBe(false);
+  db().exec('DROP TRIGGER fail_ai_assignment');
+  const saved = ai.applyTransaction(firstProposal.token);
+  expect(saved.category).toBe('Shoe Repairs');
+  expect(() => ai.applyTransaction(firstProposal.token)).toThrow(/new category suggestion/);
+
+  const suggestions = await ai.suggestRules();
+  expect(suggestions.rules).toHaveLength(1);
+  expect(suggestions.rules[0]).toMatchObject({ match: 'SYNTHETIC COBBLER', operator: 'contains',
+    category: { id: saved.categoryId, name: 'Shoe Repairs' } });
+  expect(transaction('POS PURCHASE (EFFEC 01052025) SYNTHETIC COBBLER').categoryId).toBeNull();
+  const result = ai.applyRules(suggestions.token, [suggestions.rules[0]!.index], true);
+  expect(result).toMatchObject({ created: 1, classified: 1 });
+  expect(transaction('MANUAL BAKERY').categoryId).toBeNull();
+  expect((await ai.suggestRules()).rules).toHaveLength(0);
+  expect(ai.disconnect().connected).toBe(false);
+});
+
+it('rejects unsuccessful OpenAI responses without storing the failed key', async () => {
+  const ai = new AiCategorization(store, new OpenAiClient(async () => new Response('ignored', { status: 401 })));
+  await expect(ai.connect('sk-icash-synthetic-key')).rejects.toThrow(/rejected the API key/);
+  expect(ai.status().connected).toBe(false);
+});

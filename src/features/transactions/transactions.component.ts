@@ -1,17 +1,18 @@
 import { rowChoices, retainChoice } from '../../shared/ui/choices';
-import { IAccordion, IButton, ICard, ICheckbox, IInputText, ISelect, ITextarea, ITable, ITag, type GridData, type TableColumn, NoContentComponent } from 'invensys-ng';
+import { IAccordion, IButton, ICard, ICheckbox, IDialog, IMessage, IInputText, ISelect, ITextarea, ITable, ITag, type GridData, type TableColumn, NoContentComponent } from 'invensys-ng';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Ui, money, moneyText } from '../../shared/ui/state';
 import { formatZar, ZarPipe } from '../../shared/ui/pipes';
+import type { AiClassification } from '../openai/contract';
 import type { Account } from '../accounts/contract';
 import type { Category } from '../categories/contract';
 import type { TransferCandidate } from '../transfers/contract';
-import type { EditTransaction, Filters, TransactionDetail, TransactionPage } from './contract';
+import type { EditTransaction, Filters, Transaction, TransactionDetail, TransactionPage } from './contract';
 
 @Component({
   selector: 'icash-transactions',
-  imports: [FormsModule, ZarPipe, IButton, IInputText, ISelect, ICheckbox, ITextarea, ICard, IAccordion, ITable, ITag, NoContentComponent],
+  imports: [FormsModule, ZarPipe, IButton, IInputText, ISelect, ICheckbox, ITextarea, ICard, IAccordion, ITable, ITag, IDialog, IMessage, NoContentComponent],
   templateUrl: './transactions.component.html',
 })
 export class TransactionsPage {
@@ -22,6 +23,7 @@ export class TransactionsPage {
   readonly accounts = signal<Account[]>([]);
   readonly categories = signal<Category[]>([]);
   readonly draft = signal<TransactionDetail | null>(null);
+  readonly aiDraft = signal<{ proposal: AiClassification; row: Transaction } | null>(null);
   readonly matches = signal<TransferCandidate[] | null>(null);
   filter: Filters = { sort: 'newest', ...this.ui.transactionFilter() };
   private applied: Filters = { ...this.filter };
@@ -72,6 +74,10 @@ export class TransactionsPage {
       actions: [{
         id: 'review', icon: 'pi pi-pencil', tooltip: (row) => 'Review ' + row.description,
         disabled: () => this.ui.busy(), handler: (row) => this.review(row.id),
+      }, {
+        id: 'ai-classify', icon: 'pi pi-sparkles', tooltip: (row) => 'AI classify ' + row.description,
+        visible: (row) => !row.hasSplits && row.treatment !== 'transfer' && !row.pairId,
+        disabled: () => this.ui.busy(), handler: (row) => this.suggestCategory(row),
       }],
     };
   });
@@ -103,15 +109,30 @@ export class TransactionsPage {
   review(id: string) {
     return this.ui.run(async () => {
       this.show(await this.ui.api.transaction({ id }));
-      requestAnimationFrame(() => document.getElementById('transaction-review')?.scrollIntoView({ block: 'start' }));
     });
   }
   changeTreatment(row: TransactionDetail, value: EditTransaction['treatment']) { row.treatment = value; row.categoryId = null; this.splits = []; }
   save(row: TransactionDetail) {
     return this.ui.run(async () => {
-      this.show(await this.ui.api.saveTransaction({ ...row, confirmClassification: this.confirmClassification, splits: this.splits.map((line) => ({ ...line, amount: money(line.amount) })) }));
+      await this.ui.api.saveTransaction({ ...row, confirmClassification: this.confirmClassification,
+        splits: this.splits.map((line) => ({ ...line, amount: money(line.amount) })) });
+      this.draft.set(null);
       await this.reload();
     }, 'Transaction saved.');
+  }
+  suggestCategory(row: Transaction) {
+    return this.ui.run(async () => {
+      const proposal = await this.ui.api.suggestAiCategory({ id: row.id });
+      this.aiDraft.set({ row, proposal });
+    });
+  }
+  applyCategory(proposal: AiClassification) {
+    return this.ui.run(async () => {
+      await this.ui.api.applyAiCategory({ id: proposal.token });
+      this.aiDraft.set(null);
+      this.categories.set(await this.ui.api.categories());
+      await this.reload();
+    }, 'AI category saved.');
   }
   futureRule(row: TransactionDetail) {
     const categoryId = row.categoryId;

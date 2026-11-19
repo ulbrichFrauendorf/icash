@@ -20,12 +20,40 @@ export class ProfileStore {
     mkdirSync(this.root, { recursive: true, mode: 0o700 });
   }
 
-  path(id: string, name: 'ledger.sqlite' | 'key' | 'profile.json' | 'before-upgrade.sqlite') {
+  path(id: string, name: 'ledger.sqlite' | 'key' | 'profile.json' | 'before-upgrade.sqlite' | 'openai-key') {
     return join(this.root, id, name);
   }
 
   key(id: string) {
     return this.protection.unwrap(readFileSync(this.path(id, 'key')));
+  }
+
+  hasOpenAiKey(profileId: string) {
+    return existsSync(this.path(profileId, 'openai-key'));
+  }
+
+  openAiKey(profileId: string): string {
+    if (!this.hasOpenAiKey(profileId)) throw new UserError('Connect OpenAI in Settings before requesting suggestions.');
+    const bytes = this.protection.unwrap(readFileSync(this.path(profileId, 'openai-key')));
+    try { return bytes.toString('utf8'); }
+    finally { bytes.fill(0); }
+  }
+
+  setOpenAiKey(profileId: string, key: string | null) {
+    const file = this.path(profileId, 'openai-key');
+    if (key === null) {
+      rmSync(file, { force: true });
+      return;
+    }
+    const temp = file + '.tmp';
+    const bytes = Buffer.from(key, 'utf8');
+    try {
+      writeFileSync(temp, this.protection.wrap(bytes), { mode: 0o600 });
+      renameSync(temp, file);
+    } finally {
+      bytes.fill(0);
+      rmSync(temp, { force: true });
+    }
   }
 
   private profiles(): Profile[] {

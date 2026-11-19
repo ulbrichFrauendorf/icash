@@ -1,8 +1,9 @@
 import { rowChoices, retainChoice } from '../../shared/ui/choices';
-import { IButton, ICard, ICheckbox, IInputText, ISelect, NoContentComponent } from 'invensys-ng';
+import { IButton, ICard, ICheckbox, IDialog, IMessage, IInputText, ISelect, NoContentComponent } from 'invensys-ng';
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Ui, money, moneyText } from '../../shared/ui/state';
+import type { AiRules } from '../openai/contract';
 import type { Account } from '../accounts/contract';
 import type { Category } from '../categories/contract';
 import type { Rule, RulePreview } from './contract';
@@ -15,7 +16,7 @@ const blank = () => ({
 
 @Component({
   selector: 'icash-rules',
-  imports: [FormsModule, IButton, IInputText, ISelect, ICheckbox, ICard, NoContentComponent],
+  imports: [FormsModule, IButton, IInputText, ISelect, ICheckbox, ICard, IDialog, IMessage, NoContentComponent],
   templateUrl: './rules.component.html',
 })
 export class RulesPage {
@@ -26,6 +27,9 @@ export class RulesPage {
   readonly accounts = signal<Account[]>([]);
   readonly rules = signal<Rule[]>([]);
   readonly preview = signal<RulePreview | null>(null);
+  readonly aiDraft = signal<AiRules | null>(null);
+  readonly selectedRules = signal<Set<number>>(new Set());
+  applyToImported = true;
   draft = blank();
   constructor() {
     void this.ui.load(async () => {
@@ -62,6 +66,40 @@ export class RulesPage {
     return this.ui.confirm('Delete this categorization rule?', () => {
       void this.ui.run(async () => { this.rules.set(await this.ui.api.deleteRule({ id })); this.reset(); this.preview.set(null); }, 'Rule deleted.');
     }, 'danger');
+  }
+  suggestRules() {
+    return this.ui.run(async () => {
+      const result = await this.ui.api.suggestAiRules();
+      if (!result.rules.length) {
+        this.ui.info.set('No new rules could be suggested for uncategorized transactions.');
+        return;
+      }
+      this.applyToImported = true;
+      this.selectedRules.set(new Set());
+      this.aiDraft.set(result);
+    });
+  }
+  selectRule(index: number, checked: boolean) {
+    this.selectedRules.update((selected) => {
+      const next = new Set(selected);
+      if (checked) next.add(index);
+      else next.delete(index);
+      return next;
+    });
+  }
+  saveAiRules(draft: AiRules) {
+    return this.ui.run(async () => {
+      const result = await this.ui.api.applyAiRules({
+        token: draft.token, selected: [...this.selectedRules()], applyToImported: this.applyToImported,
+      });
+      this.rules.set(result.rules);
+      this.categories.set((await this.ui.api.categories()).filter((item) => item.leaf && !item.archived));
+      this.preview.set(null);
+      this.aiDraft.set(null);
+      const rules = result.created === 1 ? 'rule' : 'rules';
+      const transactions = result.classified === 1 ? 'transaction' : 'transactions';
+      this.ui.info.set(`Saved ${result.created} ${rules} and categorized ${result.classified} imported ${transactions}.`);
+    });
   }
   previewRules() { return this.ui.run(async () => this.preview.set(await this.ui.api.previewRules())); }
   applyRules(preview: RulePreview) {

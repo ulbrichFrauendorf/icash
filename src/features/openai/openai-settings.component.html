@@ -1,0 +1,24 @@
+<i-card class="surface">
+  <div class="stack">
+    <div class="section-header">
+      <h2>OpenAI connection</h2>
+      <i-tag [value]="connected() ? 'Connected' : 'Disconnected'"
+        [severity]="connected() ? 'success' : 'secondary'" />
+    </div>
+    <p>Connect an OpenAI project to suggest categories and rules. iCash uses {{ model }}.</p>
+    <p>AI requests send cleaned merchant or transaction descriptions, debit or credit direction, and category names to OpenAI. Requests can incur API charges.</p>
+    <p>The key is encrypted using this computer’s key store. Each household has its own connection.</p>
+    <i-input-text [id]="'openai-api-key'" label="OpenAI API key" type="password"
+      [fluid]="true" [(ngModel)]="key" [disabled]="ui.busy()" />
+    <div class="actions">
+      <i-button (clicked)="connect()" [disabled]="!key.trim() || ui.busy()">
+        {{ connected() ? 'Verify and replace key' : 'Verify and connect' }}
+      </i-button>
+      @if (connected()) {
+        <i-button severity="secondary" [outlined]="true" [disabled]="ui.busy()" (clicked)="disconnect()">
+          Disconnect
+        </i-button>
+      }
+    </div>
+  </div>
+</i-card>

@@ -184,21 +184,16 @@
     </div>
   </i-card>
   @if (draft(); as row) {
-    <i-card class="surface" id="transaction-review">
-      <div class="stack">
-        <div class="section-header">
-          <div>
-            <h2>{{ row.description }}</h2>
-            <p>{{ row.date }} · {{ row.account }} · {{ row.amount | zar }}</p>
-          </div>
-          <i-button
-            (clicked)="draft.set(null)"
-            severity="secondary"
-            [outlined]="true"
-          >
-            Close review
-          </i-button>
+    <i-dialog header="Edit transaction" width="56rem" [visible]="true" [closable]="!ui.busy()"
+      (visibleChange)="!$event && draft.set(null)">
+      <div class="stack" id="transaction-review">
+        <div>
+          <h2>{{ row.description }}</h2>
+          <p>{{ row.date }} · {{ row.account }} · {{ row.amount | zar }}</p>
         </div>
+        @if (ui.error(); as error) {
+          <i-message severity="danger">{{ error }}</i-message>
+        }
         <p class="muted">
           Classification · {{ row.rule || row.classification }} · Bank reference
           {{ row.reference || '—' }}
@@ -402,6 +397,32 @@
           <p>Statement balance {{ row.balance | zar }}</p>
         </i-accordion>
       </div>
-    </i-card>
+    </i-dialog>
+  }
+  @if (aiDraft(); as draft) {
+    <i-dialog header="Confirm AI classification" width="34rem" [visible]="true" [closable]="!ui.busy()"
+      (visibleChange)="!$event && aiDraft.set(null)">
+      <div class="stack">
+        <p><strong>{{ draft.row.description }}</strong></p>
+        <p class="muted">{{ draft.row.date }} · {{ draft.row.amount | zar }} · {{ draft.row.category || 'Uncategorized' }}</p>
+        @if (draft.proposal.category.id) {
+          <p>Apply the category <strong>{{ draft.proposal.category.label }}</strong> to this transaction?</p>
+        } @else {
+          <p>Create the expense category <strong>{{ draft.proposal.category.label }}</strong> and apply it to this transaction?</p>
+        }
+        @if (draft.proposal.reason) {
+          <p class="muted">{{ draft.proposal.reason }}</p>
+        }
+        @if (ui.error(); as error) {
+          <i-message severity="danger">{{ error }}</i-message>
+        }
+      </div>
+      <div slot="footer" class="actions">
+        <i-button severity="secondary" [outlined]="true" [disabled]="ui.busy()" (clicked)="aiDraft.set(null)">Cancel</i-button>
+        <i-button [disabled]="ui.busy()" (clicked)="applyCategory(draft.proposal)">
+          {{ draft.proposal.category.id ? 'Apply classification' : 'Create category and apply' }}
+        </i-button>
+      </div>
+    </i-dialog>
   }
 </div>

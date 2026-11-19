@@ -4,9 +4,11 @@ import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Ui } from '../../shared/ui/state';
 
+import { OpenAiSettings } from '../openai/openai-settings.component';
+
 @Component({
   selector: 'icash-settings',
-  imports: [FormsModule, IButton, IInputText, ISelect, ICheckbox, ICard, ITabs, ITabPanel],
+  imports: [FormsModule, IButton, IInputText, ISelect, ICheckbox, ICard, ITabs, ITabPanel, OpenAiSettings],
   templateUrl: './settings.component.html',
 })
 export class SettingsPage {
