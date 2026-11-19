@@ -20,7 +20,7 @@ export class Ui {
   readonly busy = signal(false);
   readonly error = signal('');
   readonly info = signal('');
-  readonly month = signal(localDate().slice(0, 7));
+  readonly month = signal(budgetMonth(localDate(), 25));
   readonly api = new Proxy({} as Api, {
     get: (_, key: keyof Api) => async (input?: unknown) => {
       const bridge = (window as Window & { icash?: Bridge }).icash;
@@ -43,8 +43,8 @@ export class Ui {
   state(state: ProfileState, returnToOverview = true) {
     const previous = this.profiles().active;
     const today = localDate();
-    const currentMonth = budgetMonth(today, state.active?.payDay ?? null);
-    if (this.month() === budgetMonth(today, previous?.payDay ?? null)) this.month.set(currentMonth);
+    const currentMonth = budgetMonth(today, state.active?.payDay ?? 25);
+    if (this.month() === budgetMonth(today, previous?.payDay ?? 25)) this.month.set(currentMonth);
     if (previous?.id !== state.active?.id) {
       this.history.reset();
       if (returnToOverview) void this.router.navigateByUrl('/overview', { replaceUrl: true });

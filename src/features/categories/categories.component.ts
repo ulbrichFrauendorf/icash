@@ -1,9 +1,8 @@
 import { rowChoices, retainChoice } from '../../shared/ui/choices';
-import { IButton, ICard, ICheckbox, IInputText, ISelect, ITable, PageHeaderActionsDirective, PageHeaderContentDirective, PageLayoutComponent, PageRightSidebarDirective, type GridAction, type GridData } from 'invensys-ng';
+import { IButton, ICard, ICheckbox, IInputText, ISelect, ITable, PageHeaderContentDirective, PageLayoutComponent, IDialog, type GridAction, type GridData } from 'invensys-ng';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Ui } from '../../shared/ui/state';
-import { revealPageSidebar } from '../../shared/ui/navigation';
 import { sortableColumns } from '../../shared/ui/table-columns';
 import type { TemplatePreview } from './portable';
 import type { Category } from './contract';
@@ -13,7 +12,7 @@ const newCategory = (): Draft => ({ name: '', kind: 'expense', parentId: null, c
 
 @Component({
   selector: 'icash-categories',
-  imports: [FormsModule, IButton, IInputText, ISelect, ICheckbox, ICard, ITable, PageLayoutComponent, PageHeaderActionsDirective, PageHeaderContentDirective, PageRightSidebarDirective],
+  imports: [FormsModule, IButton, IInputText, ISelect, ICheckbox, ICard, ITable, PageLayoutComponent, PageHeaderContentDirective, IDialog],
   templateUrl: './categories.component.html',
 })
 export class CategoriesPage {
@@ -38,11 +37,12 @@ export class CategoriesPage {
       details: { columns, rows: (row) => this.children(row.id).map(present), actions },
     };
   });
-  editorVisible = true;
+  editorVisible = false;
+  groupEditor = false;
   draft = newCategory();
   from = '';
   to = '';
-  reset() { this.draft = newCategory(); this.showEditor(); }
+  reset() { this.groupEditor = false; this.draft = newCategory(); this.showEditor(); }
   constructor() { void this.ui.load(async () => this.list.set(await this.ui.api.categories())); }
   roots() { return this.list().filter((entry) => !entry.parentId); }
   children(id: string) { return this.list().filter((entry) => entry.parentId === id); }
@@ -53,9 +53,9 @@ export class CategoriesPage {
     const parent = this.list().find((item) => item.id === category.parentId);
     return parent ? parent.name + ' / ' + category.name : category.name;
   }
-  edit(category: Category) { this.draft = { ...category }; this.showEditor(); }
-  private showEditor() { this.editorVisible = true; revealPageSidebar('category-editor'); }
-  save() { return this.ui.run(async () => { this.list.set(await this.ui.api.saveCategory(this.draft)); this.draft = newCategory(); }, 'Category saved.'); }
+  edit(category: Category) { this.groupEditor = !category.parentId; this.draft = { ...category }; this.showEditor(); }
+  private showEditor() { this.editorVisible = true; }
+  save() { return this.ui.run(async () => { this.list.set(await this.ui.api.saveCategory(this.draft)); this.editorVisible = false; }, 'Category saved.'); }
   restore() { return this.ui.run(async () => this.list.set(await this.ui.api.restoreDefaults()), 'Missing household defaults restored where possible.'); }
   previewMerge() { return this.ui.run(async () => this.usage.set(await this.ui.api.categoryUsage({ id: this.from }))); }
   merge() {

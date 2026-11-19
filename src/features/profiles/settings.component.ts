@@ -19,22 +19,22 @@ export class SettingsPage {
   seed = true;
   passphrase = '';
   confirmation = '';
-  payDay = '';
+  payDay = '25';
 
   constructor() {
     effect(() => {
       const payDay = this.ui.profiles().active?.payDay;
-      this.payDay = payDay == null ? '' : String(payDay);
+      this.payDay = String(payDay ?? 25);
     });
   }
 
   validPayDay() {
-    return this.payDay === '' || (/^\d{1,2}$/.test(this.payDay) && Number(this.payDay) >= 1 && Number(this.payDay) <= 31);
+    return (/^\d{1,2}$/.test(this.payDay) && Number(this.payDay) >= 1 && Number(this.payDay) <= 31);
   }
 
   savePayDay() {
     if (!this.validPayDay()) return;
-    const payDay = this.payDay === '' ? null : Number(this.payDay);
+    const payDay = Number(this.payDay);
     return this.ui.run(async () => this.ui.state(await this.ui.api.setPayDay({ payDay })), 'Payday saved.');
   }
 

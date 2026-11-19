@@ -8,7 +8,7 @@ import type { Category, mergeInput, saveCategoryInput } from './contract';
 export function categories(db: Db): Category[] {
   const rows = db.prepare(`
     SELECT id,parent_id AS parentId,template_key AS templateKey,name,kind,colour,icon,sort,archived,
-      exclude_reports AS excludeReports, NOT EXISTS (SELECT 1 FROM categories child WHERE child.parent_id=c.id) AS leaf
+      exclude_reports AS excludeReports, parent_id IS NOT NULL AS leaf
     FROM categories c ORDER BY sort,name,id
   `).all() as Category[];
   return rows.map((row) => ({
@@ -39,11 +39,9 @@ export function saveCategory(db: Db, input: z.infer<typeof saveCategoryInput>): 
   if (input.id && !existing) throw new UserError('Category was not found.');
   if (input.parentId && (!parent || parent.parentId || parent.id === input.id || parent.kind !== input.kind ||
       (!input.archived && parent.archived) || (existing && !existing.leaf))) {
-    throw new UserError('Choose a compatible top-level category.');
+    throw new UserError('Choose a group with the same category type.');
   }
-  if (parent?.leaf && Object.values(usage(db, parent.id)).some(Boolean)) {
-    throw new UserError('Reassign the parent’s existing transactions, rules, and budgets before adding a child.');
-  }
+  if (existing && Boolean(input.parentId) !== existing.leaf) throw new UserError('A category must stay in a group. Create a separate group to reorganize it.');
   if (existing && existing.kind !== input.kind && (!existing.leaf || Object.values(usage(db, existing.id)).some(Boolean))) {
     throw new UserError('This category is in use. Create a category of the desired type.');
   }
@@ -69,7 +67,7 @@ export function mergeCategories(db: Db, { from, to }: z.infer<typeof mergeInput>
     const source = list.find((category) => category.id === from);
     const target = list.find((category) => category.id === to);
     if (!source?.leaf || !target?.leaf || target.archived || source.kind !== target.kind || from === to) {
-      throw new UserError('Choose two different leaf categories of the same type and an active destination.');
+      throw new UserError('Choose two different categories of the same type and an active destination.');
     }
     for (const [table, period] of [['monthly_allocations', 'month'], ['budget_defaults', 'effective']] as const) {
       if (db.prepare(`SELECT 1 FROM ${table} a JOIN ${table} b ON a.${period}=b.${period}

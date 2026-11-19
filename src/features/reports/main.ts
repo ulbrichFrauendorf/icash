@@ -3,13 +3,10 @@ import type { z } from 'zod';
 import type { Db } from '../../platform/main/database';
 import { cents, decimalMoney, median, shiftMonth } from '../../shared/finance';
 import { ledgerLines } from '../../shared/ledger';
-import { accounts } from '../accounts/main';
 import { categories } from '../categories/main';
-import { budgetMonth, budgetPeriod, fullyCovered } from '../monthly-budget/domain';
+import { budgetMonth, budgetPeriod } from '../monthly-budget/domain';
 import { getBudget } from '../monthly-budget/main';
 import { householdPayDay } from '../profiles/main';
-import { nextOccurrence, occurrencesInPeriod } from '../recurring/domain';
-import { schedules } from '../recurring/main';
 import { goals } from '../savings-goals/main';
 import type { Comparison, Report, reportInput } from './contract';
 
@@ -30,10 +27,6 @@ export function report(db: Db, input: z.infer<typeof reportInput>): Report {
   const months = new Map<string, Comparison>();
   const spending = new Map<string, Map<string | null, number>>();
   const uncategorized = new Set<string>();
-  const active = accountId ? accounts(db).filter((account) => account.id === accountId) : accounts(db).filter((account) => !account.archived);
-  const coverage = db.prepare('SELECT account_id AS accountId,start,end FROM coverage').all() as { accountId: string; start: string; end: string }[];
-  const covered = (month: string) => active.length > 0 && active.every((account) =>
-    fullyCovered(month, coverage.filter((row) => row.accountId === account.id), payDay));
   for (const line of ledgerLines(db, { start: budgetPeriod(first, payDay).start, end, accountId }, 'report')) {
     const month = budgetMonth(line.date, payDay);
     const summary = months.get(month) ?? { month, income: 0, expense: 0, net: 0 };
@@ -69,23 +62,15 @@ export function report(db: Db, input: z.infer<typeof reportInput>): Report {
   for (const key of scope) {
     for (const [categoryId, amount] of spending.get(key) ?? []) current.set(categoryId, cents((current.get(categoryId) ?? 0) + amount));
   }
-  const previousMonths = Array.from({ length: 6 }, (_, index) => shiftMonth(firstMonth, index - 6)).filter(covered);
+  const previousMonths = Array.from({ length: 6 }, (_, index) => shiftMonth(firstMonth, index - 6)).filter((key) => months.has(key));
   const allocations = scope.map((key) => getBudget(db, key));
   const total = (key: 'allocated' | 'actual' | 'remaining') => allocations.reduce((sum, value) => cents(sum + value[key]), 0);
-  const recurring = accountId ? [] : schedules(db).filter((row) => row.state === 'confirmed' && row.amount < 0).flatMap((row) => {
-    let next = row.next;
-    const latest = row.evidence.at(-1)?.date;
-    if (latest && latest >= next) next = nextOccurrence(latest, row.cadence);
-    const amount = cents(-row.amount * occurrencesInPeriod(next, row.cadence, start, end));
-    return amount ? [{ id: row.fingerprint, name: row.name, amount }] : [];
-  }).sort((a, b) => b.amount - a.amount);
   const savings = goals(db).map(({ id, name, progress, target }) => ({ id, name, progress, target }));
-  const commitments = recurring.reduce((sum, row) => cents(sum + row.amount), 0);
   return {
-    ...totals, month, start, end, period, covered: scope.every(covered), uncategorized: uncategorized.size,
+    ...totals, month, start, end, period, uncategorized: uncategorized.size,
     allocated: total('allocated'), budgetActual: total('actual'), remaining: total('remaining'),
-    goalProgress: savings.reduce((sum, goal) => cents(sum + goal.progress), 0), commitments,
-    goals: savings, recurring,
+    goalProgress: savings.reduce((sum, goal) => cents(sum + goal.progress), 0),
+    goals: savings,
     categories: [...current].map(([id, amount]) => {
       const history = previousMonths.map((key) => spending.get(key)?.get(id) ?? 0);
       const baseline = median(history);

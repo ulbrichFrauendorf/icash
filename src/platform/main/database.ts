@@ -30,7 +30,8 @@ export function migrate(db: Db): void {
   db.transaction(() => {
     for (const [index, migration] of migrations.entries()) {
       if (index < version) continue;
-      db.exec(migration);
+      if (typeof migration === 'string') db.exec(migration);
+      else migration(db);
       db.pragma(`user_version = ${index + 1}`);
     }
   })();

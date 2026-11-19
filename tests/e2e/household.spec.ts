@@ -28,6 +28,7 @@ test('imports, corrects, budgets, restarts, and restores a household in Electron
     };
     await page.getByLabel('Household name').fill('Synthetic household');
     await page.getByRole('button', { name: 'Create household' }).click();
+    await page.locator('i-table .i-table-header').getByRole('button', { name: 'Add account' }).click();
     await page.getByLabel('Account name').fill('Absa current');
     await page.getByRole('button', { name: 'Save account' }).click();
     await expect(page.getByText('Account saved.')).toBeVisible();
@@ -131,7 +132,20 @@ test('imports, corrects, budgets, restarts, and restores a household in Electron
     await nav('Rules');
     await expect(page.locator('.page-header').getByRole('button', { name: 'Suggest rules with AI' })).toBeVisible();
     await page.locator('icash-rules i-table').getByRole('button', { name: /^Edit / }).first().click();
-    await expect(page.getByRole('complementary', { name: 'Rule editor' }).getByRole('heading', { name: 'Edit rule' })).toBeVisible();
+    const editRule = page.getByRole('dialog', { name: 'Edit rule' });
+    await expect(editRule).toBeVisible();
+    await editRule.getByRole('button', { name: 'Cancel' }).click();
+    await page.locator('i-table .i-table-header').getByRole('button', { name: 'New rule' }).click();
+    await expect(page.getByRole('dialog', { name: 'New rule' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await nav('Categories');
+    await page.locator('i-table .i-table-header').getByRole('button', { name: 'New category' }).click();
+    const newCategory = page.getByRole('dialog', { name: 'New category' });
+    await newCategory.getByLabel('Category name').fill('Test supermarket');
+    await expect(newCategory.getByRole('button', { name: 'Save category' })).toBeDisabled();
+    await choose(newCategory, 'Category group', 'Groceries');
+    await newCategory.getByRole('button', { name: 'Save category' }).click();
+    await expect(newCategory).toHaveCount(0);
 
     await nav('Settings');
     await page.getByLabel('Payday (1–31)', { exact: true }).fill('25');
@@ -191,6 +205,7 @@ test('reviews OpenAI classifications and imported rules before saving', async ()
     const nav = (name: string) => page.locator('i-menu').getByRole('link', { name: new RegExp(name + '$') }).click();
     await page.getByLabel('Household name').fill('Synthetic OpenAI household');
     await page.getByRole('button', { name: 'Create household' }).click();
+    await page.locator('i-table .i-table-header').getByRole('button', { name: 'Add account' }).click();
     await page.getByLabel('Account name').fill('Synthetic account');
     await page.getByRole('button', { name: 'Save account' }).click();
     await expect(page.getByText('Account saved.')).toBeVisible();
@@ -225,7 +240,7 @@ test('reviews OpenAI classifications and imported rules before saving', async ()
     const confirmation = page.getByRole('dialog', { name: 'Confirm AI classification' });
     const bakery = page.locator('i-table .i-table-virtual-row').filter({ has: ai });
     await ai.click();
-    await expect(confirmation.getByText('Bakery Visits', { exact: true })).toBeVisible();
+    await expect(confirmation.getByText(/Bakery Visits$/)).toBeVisible();
     await confirmation.getByRole('button', { name: 'Cancel' }).click();
     await expect(confirmation).toHaveCount(0);
     await expect(bakery).toContainText('Uncategorized');
@@ -251,7 +266,7 @@ test('reviews OpenAI classifications and imported rules before saving', async ()
     await expect(cobbler).toContainText('Shoe Repairs');
     await classifyCobbler.click();
     const existingRule = page.getByRole('dialog', { name: 'Apply existing rule' });
-    await expect(existingRule.getByText('Shoe Repairs', { exact: true })).toBeVisible();
+    await expect(existingRule.getByText('Miscellaneous / Shoe Repairs', { exact: true })).toBeVisible();
     await existingRule.getByRole('button', { name: 'Apply classification' }).click();
     await expect(page.getByText('Existing rule applied.')).toBeVisible();
   } finally {

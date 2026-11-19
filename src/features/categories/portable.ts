@@ -47,10 +47,22 @@ function parseTemplate(raw: string): PortableTemplate {
       if (!parent || parent.parent || parent.kind !== row.kind) throw new UserError('The template contains an invalid category parent.');
     }
   }
-  const parentKeys = new Set(candidate.data.categories.map((entry) => entry.parent));
+  const groups = new Set(candidate.data.categories.map((entry) => entry.parent));
+  const legacyTargets = new Map<string, string>();
   for (const row of candidate.data.rules) {
-    if (!entries.has(row.category) || parentKeys.has(row.category) || row.conditions.accountId) {
+    const target = entries.get(row.category);
+    if (!target || groups.has(target.key) || row.conditions.accountId) {
       throw new UserError('The template contains a non-portable rule or invalid target.');
+    }
+    if (target.parent === null) {
+      // Version-one templates could target a standalone category directly.
+      let key = legacyTargets.get(target.key);
+      if (!key) {
+        key = randomUUID();
+        legacyTargets.set(target.key, key);
+        candidate.data.categories.push({ ...target, key, parent: target.key, name: 'General' });
+      }
+      row.category = key;
     }
   }
   return candidate.data;

@@ -1,12 +1,12 @@
 import type { z } from 'zod';
 import type { Db } from '../../platform/main/database';
-import { cents, median, shiftMonth } from '../../shared/finance';
+import { cents, median, monthEnd, shiftMonth } from '../../shared/finance';
 import { ledgerLines } from '../../shared/ledger';
 import { UserError } from '../../shared/schema';
 import { accounts } from '../accounts/main';
 import { categories } from '../categories/main';
 import { householdPayDay } from '../profiles/main';
-import { budgetMonth, budgetPeriod, fullyCovered, scheduledAmount } from './domain';
+import { budgetMonth, budgetPeriod, scheduledAmount } from './domain';
 import type { allocationInput, Budget, BudgetRow, closeInput, copyInput, defaultInput, Recommendations } from './contract';
 
 type Allocation = { categoryId: string; amount: number | null; rollover: number };
@@ -100,7 +100,7 @@ export function getBudget(db: Db, month: string): Budget {
     .get(month) as { revision: number; snapshot: string } | undefined;
   if (!latest || !status(db, month)) return { ...live, revision: latest?.revision ?? null };
   const saved = JSON.parse(latest.snapshot) as Budget;
-  const savedPeriod = { start: saved.start ?? budgetPeriod(month, null).start, end: saved.end ?? budgetPeriod(month, null).end };
+  const savedPeriod = { start: saved.start ?? month + '-01', end: saved.end ?? monthEnd(month) };
   return { ...saved, ...savedPeriod, closed: true, revision: latest.revision,
     delta: cents(live.actual - saved.actual),
     changed: live.start !== savedPeriod.start || live.end !== savedPeriod.end || JSON.stringify(live.rows) !== JSON.stringify(saved.rows) };
@@ -158,20 +158,19 @@ export function setClosed(db: Db, { month, closed }: z.infer<typeof closeInput>)
 export function recommend(db: Db, month: string): Recommendations {
   const payDay = householdPayDay(db);
   const active = accounts(db).filter((account) => !account.archived);
-  const coverage = db.prepare('SELECT account_id AS accountId,start,end FROM coverage').all() as { accountId: string; start: string; end: string }[];
-  const months = Array.from({ length: 6 }, (_, index) => shiftMonth(month, index - 6)).filter((period) =>
-    active.length > 0 && active.every((account) => fullyCovered(period, coverage.filter((row) => row.accountId === account.id), payDay)));
+  const periods = Array.from({ length: 6 }, (_, index) => shiftMonth(month, index - 6));
+  const observed = new Set<string>();
   const accountIds = new Set(active.map((account) => account.id));
   const actuals = new Map<string, number>();
-  if (months.length && months[0] && months.at(-1)) {
-    const monthSet = new Set(months);
-    for (const line of ledgerLines(db, { start: budgetPeriod(months[0], payDay).start, end: budgetPeriod(months.at(-1)!, payDay).end }, 'budget')) {
-      const period = budgetMonth(line.date, payDay);
-      if (!accountIds.has(line.accountId) || line.treatment !== 'expense' || !line.categoryId || !monthSet.has(period)) continue;
-      const key = line.categoryId + period;
-      actuals.set(key, cents((actuals.get(key) ?? 0) - line.amount));
-    }
+  for (const line of ledgerLines(db, { start: budgetPeriod(periods[0]!, payDay).start, end: budgetPeriod(periods.at(-1)!, payDay).end }, 'budget')) {
+    const period = budgetMonth(line.date, payDay);
+    if (!accountIds.has(line.accountId)) continue;
+    observed.add(period);
+    if (line.treatment !== 'expense' || !line.categoryId) continue;
+    const key = line.categoryId + period;
+    actuals.set(key, cents((actuals.get(key) ?? 0) - line.amount));
   }
+  const months = periods.filter((period) => observed.has(period));
   return { months, rows: categories(db).filter((item) => item.kind === 'expense' && item.leaf && !item.archived).map((item) => {
     const values = months.map((period) => actuals.get(item.id + period) ?? 0);
     return { categoryId: item.id, name: item.name, amount: values.length ? Math.max(0, median(values)) : null,

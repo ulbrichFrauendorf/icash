@@ -1,15 +1,13 @@
 <i-page-layout class="workspace-page" headerText="Categories">
   <p iPageHeaderContent class="muted">Organize household income and spending.</p>
-  <div iPageHeaderActions class="actions">
-    <i-button (clicked)="reset()" severity="secondary" [outlined]="true">New category</i-button>
-  </div>
-  <section iPageRightSidebar id="category-editor" label="Category editor" [(visible)]="editorVisible" class="stack">
-    <i-card class="surface">
+  <i-dialog [header]="groupEditor ? (draft.id ? 'Edit category group' : 'New category group') : (draft.id ? 'Edit category' : 'New category')" width="36rem" [(visible)]="editorVisible">
       <form class="stack" (ngSubmit)="save()">
-        <h2>{{ draft.id ? 'Edit category' : 'New category' }}</h2>
+        @if (!draft.id) {
+          <i-checkbox label="Create a category group" name="group" [(ngModel)]="groupEditor" (ngModelChange)="draft.parentId = null" />
+        }
         <i-input-text
           [id]="'categories-category-name'"
-          label="Category name"
+          [label]="groupEditor ? 'Group name' : 'Category name'"
           name="name"
           [(ngModel)]="draft.name"
           maxlength="80"
@@ -31,22 +29,24 @@
             optionLabel="label"
             [fluid]="true"
             [ngModel]="selected(choices1, draft.kind)"
-            (ngModelChange)="draft.kind = $event.value"
+            (ngModelChange)="draft.kind = $event.value; draft.parentId = null"
           />
-          @let choices2 =
-            [
-              { value: null, label: 'Top level' },
-              ...rowChoices(parents(), 'id', 'name'),
-            ];
-          <i-select
-            label="Parent"
-            name="parent"
-            [options]="choices2"
-            optionLabel="label"
-            [fluid]="true"
-            [ngModel]="selected(choices2, draft.parentId)"
-            (ngModelChange)="draft.parentId = $event.value"
-          />
+          @if (!groupEditor) {
+            @let choices2 =
+              [
+                { value: null, label: 'Select group' },
+                ...rowChoices(parents(), 'id', 'name'),
+              ];
+            <i-select
+              label="Category group"
+              name="parent"
+              [options]="choices2"
+              optionLabel="label"
+              [fluid]="true"
+              [ngModel]="selected(choices2, draft.parentId)"
+              (ngModelChange)="draft.parentId = $event.value"
+            />
+          }
           <i-input-text
             [id]="'categories-colour'"
             label="Colour"
@@ -90,15 +90,15 @@
         <div class="actions">
           <i-button
             type="submit"
-            [disabled]="ui.busy() || !draft.name.trim()"
+            [disabled]="ui.busy() || !draft.name.trim() || (!groupEditor && !draft.parentId)"
             severity="primary"
           >
-            Save category
+            {{ groupEditor ? 'Save group' : 'Save category' }}
           </i-button>
           @if (draft.id) {
             <i-button
               type="button"
-              (clicked)="reset()"
+              (clicked)="editorVisible = false"
               severity="secondary"
               [outlined]="true"
             >
@@ -107,12 +107,13 @@
           }
         </div>
       </form>
-    </i-card>
-  </section>
+  </i-dialog>
   <div class="page-main">
     <i-table [grid]="grid()" dataKey="id" size="small"
       [sortable]="true" [filterable]="true" [globalFilter]="true" [scrollable]="true"
-      height="min(52dvh, 30rem)" emptyMessage="Create a category or restore the household defaults." />
+      height="min(52dvh, 30rem)" emptyMessage="Create a category or restore the household defaults.">
+      <i-button header icon="pi pi-plus" size="small" severity="info" ariaLabel="New category" (clicked)="reset()" />
+    </i-table>
     <i-card class="surface">
       <div class="stack">
         <h2>Merge categories</h2>

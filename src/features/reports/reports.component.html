@@ -104,14 +104,7 @@
       </div>
       <div class="section-header period-label">
         <span>{{ report.start }} to {{ report.end }}</span>
-        <i-tag
-          [value]="
-            report.covered
-              ? 'Statement coverage confirmed'
-              : 'Statement coverage unconfirmed'
-          "
-          [severity]="report.covered ? 'success' : 'warning'"
-        />
+
       </div>
       @if (!accounts().length) {
         <i-card class="surface empty">
@@ -244,31 +237,14 @@
                 {{ report.goalProgress | zar }}
               </strong>
             </div>
-            @if (!account) {
-              <div class="list-row">
-                <i-button (clicked)="ui.go('Recurring')" [text]="true">
-                  Forecast commitments
-                </i-button>
-                <strong>{{ report.commitments | zar }}</strong>
-              </div>
-            }
+
             @if (report.goals.length) {
               <i-accordion header="Savings goal breakdown">
                 <i-table [grid]="goalGrid(report)" dataKey="id" size="small" [sortable]="true" [filterable]="true"
                   [globalFilter]="true" [virtualScroll]="true" height="16rem" />
               </i-accordion>
             }
-            @if (report.recurring.length) {
-              <i-accordion header="Forecast breakdown">
-                <icash-chart
-                  label="Confirmed recurring commitments in the selected period"
-                  [labels]="recurringChart(report).labels"
-                  [series]="recurringChart(report).series"
-                />
-                <i-table [grid]="recurringGrid(report)" dataKey="id" size="small" [sortable]="true" [filterable]="true"
-                  [globalFilter]="true" [virtualScroll]="true" height="16rem" />
-              </i-accordion>
-            }
+
             @if (detailed()) {
               <div class="list-row">
                 <span>Prior period cash flow</span>

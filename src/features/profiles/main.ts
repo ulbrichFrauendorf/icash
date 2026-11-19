@@ -12,8 +12,8 @@ export interface KeyProtection {
   unwrap(wrapped: Buffer): Buffer;
 }
 
-export function householdPayDay(db: Db): number | null {
-  return (db.prepare('SELECT pay_day AS payDay FROM profile').get() as { payDay: number | null } | undefined)?.payDay ?? null;
+export function householdPayDay(db: Db): number {
+  return (db.prepare('SELECT coalesce(pay_day,25) AS payDay FROM profile').get() as { payDay: number | null } | undefined)?.payDay ?? 25;
 }
 
 export class ProfileStore {
@@ -72,7 +72,7 @@ export class ProfileStore {
 
   state(): ProfileState {
     const active = this.current
-      ? this.current.db.prepare('SELECT name,theme,pay_day AS payDay FROM profile').get() as Omit<ActiveProfile, 'id'>
+      ? this.current.db.prepare('SELECT name,theme,coalesce(pay_day,25) AS payDay FROM profile').get() as Omit<ActiveProfile, 'id'>
       : null;
     return { profiles: this.profiles(), active: active && this.current ? { id: this.current.id, ...active } : null };
   }
@@ -123,7 +123,7 @@ export class ProfileStore {
         try {
           migrate(db);
           db.transaction(() => {
-            db.prepare('INSERT INTO profile(name) VALUES(?)').run(name);
+            db.prepare('INSERT INTO profile(name,pay_day) VALUES(?,25)').run(name);
             if (seed) restoreDefaults(db);
           })();
         } finally { db.close(); }

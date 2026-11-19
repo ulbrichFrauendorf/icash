@@ -1,4 +1,6 @@
 // Append each new version after the existing versions. The array index defines the schema version.
+import { upgradeCategoryGroups } from './category-upgrade';
+
 export const migrations = [`
   CREATE TABLE profile (
     name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 80),
@@ -169,4 +171,4 @@ export const migrations = [`
   ) STRICT;
 `, `
   ALTER TABLE profile ADD COLUMN pay_day INTEGER CHECK(pay_day BETWEEN 1 AND 31);
-`] as const;
+`, upgradeCategoryGroups] as const;

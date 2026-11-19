@@ -29,3 +29,9 @@ export const defaultRules = [
   ['netflix', 'NETFLIX', 'entertainment.4'],
   ['spotify', 'SPOTIFY', 'entertainment.4'],
 ] as const;
+
+export function defaultGroup(kind: string, name: string) {
+  const group = householdTemplate.find(([, , type, children]) =>
+    type === kind && children.some((child) => child.toLowerCase() === name.toLowerCase()));
+  return group?.[1] ?? ({ expense: 'Miscellaneous', income: 'Income', transfer: 'Transfers', savings: 'Savings & Investments' }[kind] ?? 'Other');
+}

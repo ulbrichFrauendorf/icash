@@ -3,6 +3,7 @@ import type { Db } from '../../platform/main/database';
 import { normalizeText } from '../../shared/finance';
 import { UserError } from '../../shared/schema';
 import { categories, saveCategory } from '../categories/main';
+import { defaultGroup } from '../categories/template';
 import type { Category } from '../categories/contract';
 import { categorizer, listRules, saveRule } from '../categorization/main';
 import type { Rule } from '../categorization/contract';
@@ -50,10 +51,6 @@ function categoryLabel(category: Category, parents: ReadonlyMap<string, string>)
   return parent ? parent + ' / ' + category.name : category.name;
 }
 
-function sameName(value: string, list: Category[]) {
-  return list.find((category) => normalizeText(category.name) === normalizeText(value) && !category.archived);
-}
-
 function proposal(
   answer: ModelSuggestion, kind: ModelSample['kind'], available: Category[], all: Category[], parents: ReadonlyMap<string, string>,
 ): SuggestedCategory | null {
@@ -63,9 +60,17 @@ function proposal(
   }
   if (kind !== 'expense' || !answer.newExpense || !/^\p{L}[\p{L}\p{M} &'’()/,.-]*$/u.test(answer.newExpense)) return null;
   const name = answer.newExpense;
-  const match = sameName(name, all);
-  if (match && (!match.leaf || match.kind !== kind)) return null;
-  return { id: match?.id ?? null, name: match?.name ?? name, label: match ? categoryLabel(match, parents) : name, kind };
+  const sameLeaves = available.filter((entry) => entry.kind === kind && normalizeText(entry.name) === normalizeText(name));
+  if (!answer.newExpenseGroup && sameLeaves.length === 1) {
+    const leaf = sameLeaves[0]!;
+    return { id: leaf.id, name: leaf.name, label: categoryLabel(leaf, parents), kind };
+  }
+  const group = answer.newExpenseGroup || defaultGroup(kind, name);
+  const parent = all.find((entry) => !entry.parentId && !entry.archived && normalizeText(entry.name) === normalizeText(group));
+  if ((parent && parent.kind !== kind) || normalizeText(group) === normalizeText(name) ||
+      all.some((entry) => !entry.parentId && !entry.archived && normalizeText(entry.name) === normalizeText(name))) return null;
+  const match = available.find((entry) => parent && entry.parentId === parent.id && normalizeText(entry.name) === normalizeText(name));
+  return { id: match?.id ?? null, name: match?.name ?? name, label: match ? categoryLabel(match, parents) : group + ' / ' + name, group, kind };
 }
 
 function categoryId(db: Db, category: SuggestedCategory): string {
@@ -76,12 +81,19 @@ function categoryId(db: Db, category: SuggestedCategory): string {
     }
     return category.id;
   }
-  const existing = sameName(category.name, current);
-  if (existing?.kind === 'expense' && existing.leaf) return existing.id;
-  if (existing) throw new UserError('A category now uses the suggested name. Request a new suggestion.');
-  const list = saveCategory(db, { parentId: null, kind: 'expense', name: category.name, colour: '#278473',
-    icon: '', sort: 0, archived: false, excludeReports: false });
-  return list.find((entry) => entry.parentId === null && entry.name === category.name && !entry.archived)!.id;
+  const groupName = category.group ?? defaultGroup('expense', category.name);
+  let parent = current.find((entry) => !entry.parentId && !entry.archived && normalizeText(entry.name) === normalizeText(groupName));
+  const fields = { kind: 'expense' as const, colour: '#278473', icon: '', sort: 0, archived: false, excludeReports: false };
+  if (!parent) {
+    const groups = saveCategory(db, { ...fields, parentId: null, name: groupName });
+    parent = groups.find((entry) => !entry.parentId && !entry.archived && entry.name === groupName);
+  }
+  if (!parent || parent.kind !== 'expense') throw new UserError('Choose an expense category group.');
+  const existing = current.find((entry) => entry.parentId === parent.id && !entry.archived &&
+    normalizeText(entry.name) === normalizeText(category.name));
+  if (existing) return existing.id;
+  const list = saveCategory(db, { ...fields, parentId: parent.id, name: category.name });
+  return list.find((entry) => entry.parentId === parent.id && entry.name === category.name && !entry.archived)!.id;
 }
 
 export function rulePattern(row: RuleEvidence): RulePattern | null {
@@ -189,7 +201,8 @@ export class AiCategorization {
     const choices = available.map((category, code) => ({
       code, name: categoryLabel(category, parents), kind: category.kind as ModelSample['kind'],
     }));
-    const answers = await this.client.suggest(this.profiles.openAiKey(profile.id), samples, choices, forRules);
+    const groups = all.filter((entry) => !entry.parentId && !entry.archived && entry.kind === 'expense').map((entry) => entry.name);
+    const answers = await this.client.suggest(this.profiles.openAiKey(profile.id), samples, choices, forRules, groups);
     this.ensureCurrent(profile, epoch);
     return { answers, available, all, parents };
   }

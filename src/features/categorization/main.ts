@@ -15,7 +15,7 @@ export function listRules(db: Db): Rule[] {
 
 export function saveRule(db: Db, input: z.infer<typeof saveRuleInput>) {
   if (!categories(db).some((entry) => entry.id === input.categoryId && entry.leaf && !entry.archived)) {
-    throw new UserError('Select an active leaf category.');
+    throw new UserError('Select an active category within a group.');
   }
   if (input.conditions.accountId && !db.prepare('SELECT id FROM accounts WHERE id=?').get(input.conditions.accountId)) {
     throw new UserError('The rule account was not found.');
@@ -31,7 +31,7 @@ export function saveRule(db: Db, input: z.infer<typeof saveRuleInput>) {
 
 export function saveMerchant(db: Db, input: z.infer<typeof merchantInput>) {
   if (!categories(db).some((entry) => entry.id === input.categoryId && entry.leaf && !entry.archived)) {
-    throw new UserError('Select an active leaf category.');
+    throw new UserError('Select an active category within a group.');
   }
   db.prepare(`INSERT INTO merchant_mappings(merchant,direction,category_id) VALUES(?,?,?)
     ON CONFLICT(merchant,direction) DO UPDATE SET category_id=excluded.category_id`)

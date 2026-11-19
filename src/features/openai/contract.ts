@@ -13,6 +13,7 @@ export const applyAiRulesInput = z.object({
 
 export type AiStatus = { connected: boolean };
 export type SuggestedCategory = {
+  group?: string;
   id: string | null;
   name: string;
   label: string;

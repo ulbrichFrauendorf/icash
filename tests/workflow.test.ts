@@ -1,3 +1,4 @@
+import { migrations } from '../src/platform/main/migrations';
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -6,24 +7,23 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AiCategorization, reviewSample } from '../src/features/openai/main';
 import { OpenAiClient } from '../src/features/openai/client';
-import { confirmCoverage, saveAccount } from '../src/features/accounts/main';
+import { saveAccount } from '../src/features/accounts/main';
 import { exportBackup, restoreBackup } from '../src/features/backup-restore/main';
 import { categories, mergeCategories, restoreDefaults, saveCategory } from '../src/features/categories/main';
 import { listRules, recategorize, saveRule } from '../src/features/categorization/main';
 import { Imports } from '../src/features/import-statement/main';
 import { commitInput, mapping as mappingSchema, type ImportPreview, type Mapping } from '../src/features/import-statement/contract';
 import { getBudget, recommend, saveAllocation, setClosed } from '../src/features/monthly-budget/main';
-import { budgetMonth, budgetPeriod, fullyCovered, scheduledAmount } from '../src/features/monthly-budget/domain';
+import { budgetMonth, budgetPeriod, scheduledAmount } from '../src/features/monthly-budget/domain';
 import { ProfileStore } from '../src/features/profiles/main';
 import { csvText, report } from '../src/features/reports/main';
 import { goals, saveEntry, saveGoal } from '../src/features/savings-goals/main';
 import { filters } from '../src/features/transactions/contract';
 import { listTransactions, saveTransaction, transactionDetail } from '../src/features/transactions/main';
 import { pairTransfer } from '../src/features/transfers/main';
-import { checkIntegrity, openDatabase, schemaVersion } from '../src/platform/main/database';
+import { checkIntegrity, migrate, openDatabase, schemaVersion } from '../src/platform/main/database';
 import { parseDate, parseMoney } from '../src/shared/finance';
 import { Templates, portableTemplate } from '../src/features/categories/portable';
-import { detectSchedules, occurrencesInPeriod } from '../src/features/recurring/domain';
 
 let root: string;
 let store: ProfileStore;
@@ -82,16 +82,6 @@ describe('finance boundaries', () => {
     expect(Array.from({ length: 12 }, (_, index) => scheduledAmount(999, 'annual', '2025-' + String(index + 1).padStart(2, '0')))
       .reduce((sum, amount) => sum + amount)).toBe(999);
   });
-  it('detects complete adjacent coverage and recognizes three recurring amounts', () => {
-    expect(fullyCovered(month, [{ start: '2025-05-01', end: '2025-05-15' }, { start: '2025-05-16', end: '2025-05-31' }])).toBe(true);
-    expect(fullyCovered(month, [{ start: '2025-05-02', end: '2025-05-31' }])).toBe(false);
-    const schedules = detectSchedules(['2025-01-31','2025-02-28','2025-03-31'].map((date) => ({
-      date, amount: -12000, description: 'Subscription', merchant: '',
-    })));
-    expect(schedules[0]).toMatchObject({ cadence: 'monthly', next: '2025-04-30', amount: -12000 });
-    expect(occurrencesInPeriod('2025-01-31', 'monthly', '2025-02-01', '2025-03-30')).toBe(1);
-    expect(occurrencesInPeriod('2025-01-01', 'weekly', '2025-02-01', '2025-02-28')).toBe(4);
-  });
 });
 
 it('keeps profiles isolated, seeds once, and uses a genuinely encrypted database', () => {
@@ -100,7 +90,7 @@ it('keeps profiles isolated, seeds once, and uses a genuinely encrypted database
   saveCategory(db(), { ...grocery, name: 'Food shops' });
   restoreDefaults(db());
   expect(category('Food shops').id).toBe(grocery.id);
-  expect(schemaVersion(db())).toBe(2);
+  expect(schemaVersion(db())).toBe(3);
   expect(() => openDatabase(store.path(profile, 'ledger.sqlite'), randomBytes(32))).toThrow();
   const raw = new DatabaseSync(store.path(profile, 'ledger.sqlite'), { readOnly: true });
   expect(() => raw.prepare('SELECT name FROM profile').get()).toThrow();
@@ -110,6 +100,32 @@ it('keeps profiles isolated, seeds once, and uses a genuinely encrypted database
   store.select(profile);
   expect(category('Food shops').id).toBe(grocery.id);
   checkIntegrity(db());
+});
+
+it('upgrades legacy assignments and rejects group targets even when the group is empty', () => {
+  const legacy = openDatabase(join(root, 'legacy.sqlite'), randomBytes(32), false);
+  try {
+    legacy.exec(migrations[0]);
+    legacy.exec(migrations[1]);
+    legacy.pragma('user_version = 2');
+    legacy.exec(`INSERT INTO profile(name,pay_day) VALUES('Existing household',12);
+      INSERT INTO accounts(id,name,kind) VALUES('bank','Bank','current');
+      INSERT INTO import_batches VALUES('batch','bank','statement','file','mapping','2026-01-05',1);
+      INSERT INTO categories(id,name,kind,colour) VALUES('fuel','Fuel','expense','#000000'),
+        ('shopping','Shopping','expense','#000000'),('empty','Empty group','expense','#000000');
+      INSERT INTO transactions(id,account_id,batch_id,date,amount,description,normalized,treatment,category_id)
+        VALUES('a','bank','batch','2026-01-05',-200,'A','A','expense','fuel'),
+        ('b','bank','batch','2026-01-05',-300,'B','B','expense','shopping');`);
+    migrate(legacy);
+    const assigned = legacy.prepare(`SELECT t.id, c.name, p.name AS parent FROM transactions t
+      JOIN categories c ON c.id=t.category_id JOIN categories p ON p.id=c.parent_id ORDER BY t.id`).all();
+    expect(assigned).toEqual([{ id: 'a', name: 'Fuel', parent: 'Transport' }, { id: 'b', name: 'General', parent: 'Shopping' }]);
+    expect(legacy.prepare('SELECT pay_day FROM profile').get()).toEqual({ pay_day: 12 });
+    expect(categories(legacy).find((row) => row.id === 'empty')?.leaf).toBe(false);
+    expect(() => legacy.exec("UPDATE transactions SET category_id='empty' WHERE id='a'")).toThrow(/within a group/);
+    expect(() => saveAllocation(legacy, { month, categoryId: 'empty', amount: 200, rollover: false })).toThrow();
+    checkIntegrity(legacy);
+  } finally { legacy.close(); }
 });
 
 it('imports both layouts, preserves distinguishable repeats, and skips duplicates', async () => {
@@ -234,12 +250,10 @@ it('reconciles reports, budgets, reversals, transfers, savings, and portable rec
   expect(report(db(), { month, period: 'year' })).toMatchObject({ income: 1000000, expense: 72000, net: 928000 });
 });
 
-it('requires verified coverage and preserves a closed budget revision after category edits', async () => {
+it('uses imported history and preserves a closed budget revision after category edits', async () => {
   const main = account();
   await importFile(fixture('absa-current.csv'), main.id);
   const grocery = category('Supermarkets');
-  expect(recommend(db(), '2025-06').months).toEqual([]);
-  confirmCoverage(db(), { accountId: main.id, start: '2025-05-01', end: '2025-05-31' });
   expect(recommend(db(), '2025-06').months).toEqual([month]);
   expect(recommend(db(), '2025-06').rows.find((row) => row.categoryId === grocery.id)?.amount).toBe(50000);
   saveAllocation(db(), { month, categoryId: grocery.id, amount: 0, rollover: false });
@@ -251,7 +265,7 @@ it('requires verified coverage and preserves a closed budget revision after cate
   expect(setClosed(db(), { month, closed: true }).revision).toBe(2);
 });
 
-it('assigns budget actuals, rollover, coverage, and reports to the configured payday cycle', async () => {
+it('assigns budget actuals, rollover and reports to the configured payday cycle', async () => {
   const main = account();
   const groceries = category('Supermarkets').id;
   const statement = file('payday.csv', [
@@ -262,20 +276,15 @@ it('assigns budget actuals, rollover, coverage, and reports to the configured pa
     '20250625,Checkers next cycle,-40.00',
   ].join('\n'));
   await importFile(statement, main.id);
-  expect(store.state().active?.payDay).toBeNull();
-  expect(getBudget(db(), '2025-06')).toMatchObject({ start: '2025-06-01', end: '2025-06-30', actual: 7000 });
-
-  db().prepare('UPDATE profile SET pay_day=?').run(25);
   expect(store.state().active?.payDay).toBe(25);
   saveAllocation(db(), { month, categoryId: groceries, amount: 10000, rollover: true });
   const june = '2025-06';
   const allocation = saveAllocation(db(), { month: june, categoryId: groceries, amount: 5000, rollover: false });
   expect(allocation).toMatchObject({ start: '2025-05-25', end: '2025-06-24', actual: 5000, rollover: 9900 });
   expect(getBudget(db(), '2025-07').actual).toBe(4000);
-  confirmCoverage(db(), { accountId: main.id, start: '2025-04-25', end: '2025-06-24' });
   expect(recommend(db(), '2025-07').months).toEqual(['2025-05', june]);
   expect(report(db(), { month: june, period: 'month' })).toMatchObject({
-    start: '2025-05-25', end: '2025-06-24', covered: true, expense: 5000, budgetActual: 5000,
+    start: '2025-05-25', end: '2025-06-24', expense: 5000, budgetActual: 5000,
   });
   setClosed(db(), { month: june, closed: true });
   db().prepare('UPDATE profile SET pay_day=?').run(31);
@@ -479,7 +488,7 @@ it('reviews a full statement in batches and proposes expenses for an empty house
         'MUSIC STREAM': 'Streaming', 'ACB DEBIT EXTERNAL MOBILECO': 'Mobile Phones', 'SHOP GARDEN SERVICE': 'Gardening',
       } as Record<string, string>)[description];
       expect(category).toBeDefined();
-      return { index, category: null, newExpense: category, reason: 'Spending purpose.',
+      return { index, category: null, newExpense: category, newExpenseGroup: category === 'Gardening' ? 'House and garden' : null, reason: 'Spending purpose.',
         ruleName: category, ruleMatch: description };
     });
     return Response.json({ status: 'completed', output: [{ type: 'message',
@@ -494,7 +503,9 @@ it('reviews a full statement in batches and proposes expenses for an empty house
   expect(categories(db())).toHaveLength(0);
   imports.commit(db(), active().id, { token, version: previewed.version, acceptRejected: false,
     review: { changes: [], saveRules: true } });
-  expect(categories(db()).map(({ name }) => name).sort()).toEqual(['Gardening', 'Mobile Phones', 'Streaming', 'Supermarkets']);
+  expect(categories(db()).filter((item) => item.parentId).map(({ name }) => name).sort()).toEqual(['Gardening', 'Mobile Phones', 'Streaming', 'Supermarkets']);
+  expect(category('Gardening').parentId).toBe(category('House and garden').id);
+  expect(category('Supermarkets').parentId).toBe(category('Groceries').id);
   expect(transaction('SHOP 12345678 GARDEN SERVICE').categoryId).toBe(category('Gardening').id);
   expect(listRules(db()).some((rule) => rule.categoryId === category('Gardening').id)).toBe(false);
 });

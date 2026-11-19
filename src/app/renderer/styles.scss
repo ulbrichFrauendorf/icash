@@ -104,3 +104,13 @@ h1, h2, h3, p { margin: 0; }
 }
 
 .tab-content { padding-block-start: 1rem; }
+
+icash-app { display: block; position: relative; }
+icash-app > .page-navigation {
+    z-index: 998;
+    position: absolute;
+    left: 50%;
+    top: 1.875rem;
+    transform: translate(-50%, -50%);
+    gap: .125rem;
+}

@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import type { Account, coverageInput, saveAccountInput } from '../features/accounts/contract';
+import type { Account, saveAccountInput } from '../features/accounts/contract';
 import type { Category, mergeInput, saveCategoryInput } from '../features/categories/contract';
 import type { TemplatePreview } from '../features/categories/portable';
 import type { merchantInput, Rule, RulePreview, saveRuleInput } from '../features/categorization/contract';
@@ -7,7 +7,6 @@ import type { AuditRow, Batch, commitInput, decodeInput, FilePreview, ImportPrev
 import type { allocationInput, Budget, closeInput, copyInput, defaultInput, Recommendations } from '../features/monthly-budget/contract';
 import type { AiClassification, AiRules, AiStatus, applyAiRulesInput, openAiKeyInput } from '../features/openai/contract';
 import type { createProfileInput, payDayInput, ProfileState, selectThemeInput } from '../features/profiles/contract';
-import type { Schedule, scheduleInput } from '../features/recurring/contract';
 import type { Report, reportInput } from '../features/reports/contract';
 import type { entryInput, Goal, goalInput } from '../features/savings-goals/contract';
 import type { EditTransaction, Filters, Transaction, TransactionDetail, exportTransactionsInput } from '../features/transactions/contract';
@@ -33,7 +32,6 @@ export interface Requests {
   setPayDay: [Data<typeof payDayInput>, ProfileState];
   accounts: [undefined, Account[]];
   saveAccount: [Data<typeof saveAccountInput>, Account[]];
-  confirmCoverage: [Data<typeof coverageInput>, void];
   categories: [undefined, Category[]];
   saveCategory: [Data<typeof saveCategoryInput>, Category[]];
   categoryUsage: [ID, Record<string, number>];
@@ -73,8 +71,6 @@ export interface Requests {
   saveGoalEntry: [Data<typeof entryInput>, Goal[]];
   removeGoalEntry: [ID, Goal[]];
   goalTransfers: [undefined, { id: string; date: string; amount: number; label: string }[]];
-  schedules: [undefined, Schedule[]];
-  saveSchedule: [Data<typeof scheduleInput>, Schedule[]];
   report: [Data<typeof reportInput>, Report];
   exportReport: [Data<typeof reportInput>, boolean];
   exportTransactions: [Data<typeof exportTransactionsInput>, boolean];
@@ -91,7 +87,7 @@ export const channels: { [K in keyof Requests]: K } = {
   getProfiles: 'getProfiles', createProfile: 'createProfile', selectProfile: 'selectProfile', deleteProfile: 'deleteProfile',
   openAiStatus: 'openAiStatus', connectOpenAi: 'connectOpenAi', disconnectOpenAi: 'disconnectOpenAi',
   suggestAiCategory: 'suggestAiCategory', applyAiCategory: 'applyAiCategory', suggestAiRules: 'suggestAiRules', applyAiRules: 'applyAiRules',
-  setTheme: 'setTheme', setPayDay: 'setPayDay', accounts: 'accounts', saveAccount: 'saveAccount', confirmCoverage: 'confirmCoverage',
+  setTheme: 'setTheme', setPayDay: 'setPayDay', accounts: 'accounts', saveAccount: 'saveAccount',
   categories: 'categories', saveCategory: 'saveCategory', categoryUsage: 'categoryUsage',
   mergeCategories: 'mergeCategories', restoreDefaults: 'restoreDefaults', exportTemplate: 'exportTemplate',
   previewTemplate: 'previewTemplate', commitTemplate: 'commitTemplate', selectImport: 'selectImport',
@@ -103,7 +99,7 @@ export const channels: { [K in keyof Requests]: K } = {
   closeBudget: 'closeBudget', recommendations: 'recommendations', transferCandidates: 'transferCandidates',
   pairTransfer: 'pairTransfer', unlinkTransfer: 'unlinkTransfer', goals: 'goals', saveGoal: 'saveGoal',
   saveGoalEntry: 'saveGoalEntry', removeGoalEntry: 'removeGoalEntry', goalTransfers: 'goalTransfers',
-  schedules: 'schedules', saveSchedule: 'saveSchedule', report: 'report', exportReport: 'exportReport',
+  report: 'report', exportReport: 'exportReport',
   exportTransactions: 'exportTransactions', exportBackup: 'exportBackup', restoreBackup: 'restoreBackup',
 };
 

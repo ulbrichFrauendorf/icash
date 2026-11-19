@@ -1,10 +1,9 @@
 import { reviewCategoryChoices } from '../../shared/ui/category-choices';
 import { rowChoices, retainChoice } from '../../shared/ui/choices';
-import { IButton, ICard, ICheckbox, IDialog, IMessage, IInputText, ISelect, ITable, PageHeaderActionsDirective, PageHeaderContentDirective, PageLayoutComponent, PageRightSidebarDirective, type GridData } from 'invensys-ng';
+import { IButton, ICard, ICheckbox, IDialog, IMessage, IInputText, ISelect, ITable, PageHeaderActionsDirective, PageHeaderContentDirective, PageLayoutComponent, type GridData } from 'invensys-ng';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Ui, money, moneyText } from '../../shared/ui/state';
-import { revealPageSidebar } from '../../shared/ui/navigation';
 import { sortableColumns } from '../../shared/ui/table-columns';
 import type { AiRule, AiRules, CategoryChoice } from '../openai/contract';
 import type { Account } from '../accounts/contract';
@@ -19,7 +18,7 @@ const blank = () => ({
 
 @Component({
   selector: 'icash-rules',
-  imports: [FormsModule, IButton, IInputText, ISelect, ICheckbox, ICard, IDialog, IMessage, ITable, PageLayoutComponent, PageHeaderActionsDirective, PageHeaderContentDirective, PageRightSidebarDirective],
+  imports: [FormsModule, IButton, IInputText, ISelect, ICheckbox, ICard, IDialog, IMessage, ITable, PageLayoutComponent, PageHeaderActionsDirective, PageHeaderContentDirective],
   templateUrl: './rules.component.html',
 })
 export class RulesPage {
@@ -62,7 +61,7 @@ export class RulesPage {
     actions: [{ id: 'category', icon: 'pi pi-pencil', tooltip: (row) => 'Change category for ' + row.match,
       handler: (row) => this.aiRule.set(row) }],
   }));
-  editorVisible = true;
+  editorVisible = false;
   draft = blank();
   constructor() {
     void this.ui.load(async () => {
@@ -75,11 +74,13 @@ export class RulesPage {
   readonly categoryLabel = (category: Category) => this.categoryName(category.id);
   editableCategories() { return this.categories().filter((item) => item.leaf && !item.archived); }
   categoryName(id: string | null) {
-    return this.categories().find((item) => item.id === id)?.name ?? 'Uncategorized';
+    const category = this.categories().find((item) => item.id === id);
+    const group = category && this.categories().find((item) => item.id === category.parentId);
+    return group && category ? group.name + ' / ' + category.name : category?.name ?? 'Uncategorized';
   }
   reset() { this.draft = blank(); }
   add() { this.reset(); this.showEditor(); }
-  private showEditor() { this.editorVisible = true; revealPageSidebar('rule-editor'); }
+  private showEditor() { this.editorVisible = true; }
   edit(rule: Rule) {
     this.draft = { ...rule, ...rule.conditions, text: rule.conditions.text ?? '', accountId: rule.conditions.accountId ?? '',
       direction: rule.conditions.direction ?? '',
@@ -94,14 +95,14 @@ export class RulesPage {
         direction: this.draft.direction || undefined, accountId: this.draft.accountId || undefined,
         minimum: this.draft.minimum ? money(this.draft.minimum) : undefined, maximum: this.draft.maximum ? money(this.draft.maximum) : undefined,
       } }));
-      this.reset(); this.preview.set(null);
+      this.editorVisible = false; this.preview.set(null);
     }, 'Rule saved.');
   }
   remove() {
     if (!this.draft.id) return;
     const id = this.draft.id;
     return this.ui.confirm('Delete this categorization rule?', () => {
-      void this.ui.run(async () => { this.rules.set(await this.ui.api.deleteRule({ id })); this.reset(); this.preview.set(null); }, 'Rule deleted.');
+      void this.ui.run(async () => { this.rules.set(await this.ui.api.deleteRule({ id })); this.editorVisible = false; this.preview.set(null); }, 'Rule deleted.');
     }, 'danger');
   }
   suggestRules() {

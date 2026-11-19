@@ -1,13 +1,10 @@
 <i-page-layout class="workspace-page" headerText="Accounts">
   <p iPageHeaderContent class="muted">Manage bank accounts and cards for this household.</p>
   <div iPageHeaderActions class="actions">
-    <i-button (clicked)="add()" severity="secondary" [outlined]="true">Add account</i-button>
     <i-button (clicked)="ui.go('Import')" severity="primary">Import statement</i-button>
   </div>
-  <section iPageRightSidebar id="account-editor" label="Account editor" [(visible)]="editorVisible" class="stack">
-    <i-card class="surface">
+  <i-dialog [header]="draft.id ? 'Edit account' : 'Add account'" width="36rem" [(visible)]="editorVisible">
       <form class="stack" (ngSubmit)="save()">
-        <h2>{{ draft.id ? 'Edit account' : 'Add account' }}</h2>
         <i-input-text
           [id]="'accounts-account-name'"
           label="Account name"
@@ -52,7 +49,7 @@
           @if (draft.id) {
             <i-button
               type="button"
-              (clicked)="reset()"
+              (clicked)="editorVisible = false"
               severity="secondary"
               [outlined]="true"
             >
@@ -61,60 +58,12 @@
           }
         </div>
       </form>
-    </i-card>
-  </section>
+  </i-dialog>
   <div class="page-main">
     <i-table [grid]="grid()" dataKey="id" size="small"
       [sortable]="true" [filterable]="true" [globalFilter]="true" [virtualScroll]="true"
-      height="min(38dvh, 22rem)" emptyMessage="Add an account to import your first statement." />
-    <i-card class="surface">
-      <div class="stack">
-        <h2>Confirm statement coverage</h2>
-        <p>
-          Confirm a date range once all activity for that account is present,
-          including dates with no transactions. iCash uses verified coverage
-          when suggesting budgets.
-        </p>
-        @let choices2 =
-          [
-            { value: '', label: 'Select account' },
-            ...rowChoices(accounts(), 'id', 'name'),
-          ];
-        <i-select
-          label="Coverage account"
-          [options]="choices2"
-          optionLabel="label"
-          [fluid]="true"
-          [ngModel]="selected(choices2, coverageAccount)"
-          (ngModelChange)="coverageAccount = $event.value"
-        />
-        <div class="field-grid">
-          <i-input-text
-            [id]="'accounts-coverage-starts'"
-            label="Coverage starts"
-            type="date"
-            [(ngModel)]="start"
-            [fluid]="true"
-            [forceFloated]="true"
-          />
-          <i-input-text
-            [id]="'accounts-coverage-ends'"
-            label="Coverage ends"
-            type="date"
-            [(ngModel)]="end"
-            [fluid]="true"
-            [forceFloated]="true"
-          />
-        </div>
-        <i-button
-          [disabled]="!coverageAccount || !start || !end || ui.busy()"
-          (clicked)="confirm()"
-          severity="secondary"
-          [outlined]="true"
-        >
-          Confirm coverage
-        </i-button>
-      </div>
-    </i-card>
+      height="min(38dvh, 22rem)" emptyMessage="Add an account to import your first statement.">
+      <i-button header icon="pi pi-plus" size="small" severity="info" ariaLabel="Add account" (clicked)="add()" />
+    </i-table>
   </div>
 </i-page-layout>

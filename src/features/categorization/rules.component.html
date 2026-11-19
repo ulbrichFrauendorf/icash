@@ -1,13 +1,10 @@
 <i-page-layout class="workspace-page" headerText="Categorization rules">
   <p iPageHeaderContent class="muted">User rules run before merchant mappings and defaults. Lower priority numbers run first.</p>
   <div iPageHeaderActions class="actions">
-    <i-button (clicked)="add()" severity="secondary" [outlined]="true">New rule</i-button>
     <i-button icon="pi pi-sparkles" [disabled]="ui.busy()" (clicked)="suggestRules()">Suggest rules with AI</i-button>
   </div>
-  <section iPageRightSidebar id="rule-editor" label="Rule editor" [(visible)]="editorVisible" class="stack">
-    <i-card class="surface">
+  <i-dialog [header]="draft.id ? 'Edit rule' : 'New rule'" width="36rem" [(visible)]="editorVisible">
       <form class="stack" (ngSubmit)="save()">
-        <h2>{{ draft.id ? 'Edit rule' : 'New rule' }}</h2>
         <i-input-text
           [id]="'rules-rule-name'"
           label="Rule name"
@@ -138,7 +135,7 @@
           @if (draft.id) {
             <i-button
               type="button"
-              (clicked)="reset()"
+              (clicked)="editorVisible = false"
               severity="secondary"
               [outlined]="true"
             >
@@ -155,12 +152,13 @@
           }
         </div>
       </form>
-    </i-card>
-  </section>
+  </i-dialog>
   <div class="page-main">
     <i-table [grid]="grid()" dataKey="id" size="small"
       [sortable]="true" [filterable]="true" [globalFilter]="true" [virtualScroll]="true"
-      height="min(52dvh, 30rem)" emptyMessage="Create a rule to categorize a recurring merchant or payment." />
+      height="min(52dvh, 30rem)" emptyMessage="Create a rule to categorize a merchant or payment.">
+      <i-button header icon="pi pi-plus" size="small" severity="info" ariaLabel="New rule" (clicked)="add()" />
+    </i-table>
     <i-card class="surface">
       <div class="stack">
         <h2>Apply to previous transactions</h2>

@@ -3,8 +3,8 @@ import { open, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { z } from 'zod';
-import { accounts, confirmCoverage, saveAccount } from '../../features/accounts/main';
-import { coverageInput, saveAccountInput } from '../../features/accounts/contract';
+import { accounts, saveAccount } from '../../features/accounts/main';
+import { saveAccountInput } from '../../features/accounts/contract';
 import { exportBackup, restoreBackup } from '../../features/backup-restore/main';
 import { categoryUsage, categories, mergeCategories, restoreDefaults, saveCategory } from '../../features/categories/main';
 import { mergeInput, saveCategoryInput } from '../../features/categories/contract';
@@ -17,8 +17,6 @@ import { allocationInput, closeInput, copyInput, defaultInput, monthInput } from
 import { copyBudget, getBudget, recommend, saveAllocation, saveDefault, setClosed } from '../../features/monthly-budget/main';
 import { createProfileInput, payDayInput, profileIdInput, selectThemeInput } from '../../features/profiles/contract';
 import type { ProfileStore } from '../../features/profiles/main';
-import { scheduleInput } from '../../features/recurring/contract';
-import { saveSchedule, schedules } from '../../features/recurring/main';
 import { reportInput } from '../../features/reports/contract';
 import { csv, numericCsv, report } from '../../features/reports/main';
 import { entryInput, goalInput } from '../../features/savings-goals/contract';
@@ -126,7 +124,6 @@ export function registerHandlers(profiles: ProfileStore, window: () => BrowserWi
   });
   handle('accounts', empty, () => accounts(db()));
   handle('saveAccount', saveAccountInput, (input) => saveAccount(db(), input));
-  handle('confirmCoverage', coverageInput, (input) => confirmCoverage(db(), input));
   handle('categories', empty, () => categories(db()));
   handle('saveCategory', saveCategoryInput, (input) => saveCategory(db(), input));
   handle('categoryUsage', profileIdInput, ({ id }) => categoryUsage(db(), id));
@@ -203,8 +200,6 @@ export function registerHandlers(profiles: ProfileStore, window: () => BrowserWi
   handle('saveGoalEntry', entryInput, (input) => saveEntry(db(), input));
   handle('removeGoalEntry', profileIdInput, ({ id }) => removeEntry(db(), id));
   handle('goalTransfers', empty, () => goalTransfers(db()));
-  handle('schedules', empty, () => schedules(db()));
-  handle('saveSchedule', scheduleInput, (input) => saveSchedule(db(), input));
   handle('report', reportInput, (input) => report(db(), input));
   handle('exportReport', reportInput, (input) => saveText('Export financial report', 'icash-report.csv', () => {
     const row = report(db(), input);

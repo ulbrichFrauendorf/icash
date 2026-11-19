@@ -1,5 +1,5 @@
 import { rowChoices, retainChoice } from '../../shared/ui/choices';
-import { IAccordion, IButton, ICard, IInputText, IProgressSpinner, ISelect, ITable, ITag, PageHeaderActionsDirective, PageRightSidebarDirective, PageLayoutComponent, type GridData, NoContentComponent } from 'invensys-ng';
+import { IAccordion, IButton, ICard, IInputText, IProgressSpinner, ISelect, ITable, PageHeaderActionsDirective, PageRightSidebarDirective, PageLayoutComponent, type GridData, NoContentComponent } from 'invensys-ng';
 import { Component, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { formatZar, ZarPipe } from '../../shared/ui/pipes';
@@ -12,7 +12,7 @@ import { ReportChart } from './chart.component';
 
 @Component({
   selector: 'icash-reports',
-  imports: [FormsModule, ZarPipe, ReportChart, IButton, IInputText, ISelect, ICard, IAccordion, IProgressSpinner, ITable, ITag, NoContentComponent, PageLayoutComponent, PageHeaderActionsDirective, PageRightSidebarDirective],
+  imports: [FormsModule, ZarPipe, ReportChart, IButton, IInputText, ISelect, ICard, IAccordion, IProgressSpinner, ITable, NoContentComponent, PageLayoutComponent, PageHeaderActionsDirective, PageRightSidebarDirective],
   templateUrl: './reports.component.html',
 })
 export class ReportsPage {
@@ -55,11 +55,11 @@ export class ReportsPage {
   categoryGrid(report: Report): GridData {
     return {
       columns: sortableColumns([
-        { field: 'name', header: 'Category' }, currencyColumn('spending', 'Spending'),
+        { field: 'name', header: 'Category group' }, currencyColumn('spending', 'Spending'),
         { field: 'baselineLabel', header: 'Spending patterns' },
       ]),
       rows: report.categories.map((row) => ({ ...row, spending: tableMoney(row.amount),
-        baselineLabel: row.unusual ? 'Above median ' + formatZar(row.baseline) + ' across ' + row.historyMonths + ' verified months' : '—' })),
+        baselineLabel: row.unusual ? 'Above median ' + formatZar(row.baseline) + ' across ' + row.historyMonths + ' prior periods with activity' : '—' })),
       actions: [{ id: 'contributors', icon: 'pi pi-list', tooltip: (row) => 'Review spending for ' + row.name,
         handler: (row) => this.drill(report, row.id) }],
     };
@@ -74,16 +74,6 @@ export class ReportsPage {
         percent: Math.round(row.progress / row.target * 100) })),
     };
   }
-  recurringGrid(report: Report): GridData {
-    return {
-      columns: sortableColumns([{ field: 'name', header: 'Schedule' }, currencyColumn('value', 'Forecast')]),
-      rows: report.recurring.map((row) => ({ ...row, value: tableMoney(row.amount) })),
-    };
-  }
-  recurringChart(report: Report) { return this.cached(report, 'recurring', () => ({
-    labels: report.recurring.slice(0, 6).map((row) => row.name),
-    series: [{ label: 'Forecast', values: report.recurring.slice(0, 6).map((row) => row.amount), colour: '--icash-spending' }],
-  })); }
   private cached(report: Report, key: string, build: () => { labels: string[]; series: { label: string; values: number[]; colour: string }[] }) {
     let options = this.chartCache.get(report);
     if (!options) { options = new Map(); this.chartCache.set(report, options); }

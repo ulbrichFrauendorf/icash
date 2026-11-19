@@ -6,7 +6,6 @@ export const screenPaths = {
     Transactions: 'transactions',
     Import: 'import',
     Budgets: 'budgets',
-    Recurring: 'recurring',
     Savings: 'savings',
     Reports: 'reports',
     Categories: 'categories',
@@ -40,7 +39,6 @@ export const householdMenu: MenuModel[] = [
         label: 'Planning',
         items: [
             item('Budgets', 'Budgets', 'calculator'),
-            item('Recurring', 'Recurring', 'refresh'),
             item('Savings', 'Savings goals', 'flag'),
             item('Reports', 'Reports', 'chart-line'),
         ],
