@@ -6,19 +6,21 @@ import { categories, saveCategory } from '../categories/main';
 import type { Category } from '../categories/contract';
 import { categorizer, listRules, saveRule } from '../categorization/main';
 import type { Rule } from '../categorization/contract';
-import type { Classifiable } from '../categorization/domain';
+import { matches, type Classifiable } from '../categorization/domain';
 import type { ProfileStore } from '../profiles/main';
 import { saveTransaction, transactionDetail } from '../transactions/main';
 import type { TransactionDetail } from '../transactions/contract';
 import { OpenAiClient, type AiClient, type ModelSample, type ModelSuggestion } from './client';
 import type { AiClassification, AiRule, AiRules, CategoryChoice, SuggestedCategory } from './contract';
-import { ruleMatch, safeDescription } from './descriptions';
+import { ruleMatch, safeDescription, shorterMatch } from './descriptions';
 
 const limit = 24;
 type Profile = ReturnType<ProfileStore['active']>;
 export type RuleEvidence = { description: string; amount: number; treatment: 'expense' | 'income' };
 type PostedRow = Classifiable & RuleEvidence & { id: string };
-type RuleSample = ModelSample & { match: string; operator: 'contains' | 'equals'; samples: number };
+type RulePattern = Pick<AiRule, 'name' | 'match' | 'direction'> & { sourceMatch: string };
+type RuleSample = ModelSample & RulePattern & { samples: number };
+export type RuleSuggestion = AiRule & Pick<RulePattern, 'sourceMatch'>;
 type Pending<T> = { db: Db; value: T };
 
 const eligibleSql = `SELECT t.id,t.account_id AS accountId,t.description,t.merchant,t.amount,t.treatment
@@ -30,8 +32,17 @@ const conditionKey = (condition: Rule['conditions']) => JSON.stringify([
   condition.field, condition.operator, normalizeText(condition.text ?? ''), condition.direction,
   condition.accountId, condition.minimum, condition.maximum,
 ]);
-const ruleConditions = (rule: Pick<AiRule, 'operator' | 'direction' | 'match'>): Rule['conditions'] =>
-  ({ field: 'description', operator: rule.operator, direction: rule.direction, text: rule.match });
+const ruleConditions = (rule: Pick<RulePattern, 'direction' | 'match'>): Rule['conditions'] =>
+  ({ field: 'description', operator: 'contains', direction: rule.direction, text: rule.match });
+const ledgerMatches = (db: Db) => db.prepare<[number, string], { description: string }>(`SELECT DISTINCT description FROM transactions
+  WHERE (amount < 0) = ? AND instr(normalized, ?) > 0`);
+
+function overlapsLedger(matches: ReturnType<typeof ledgerMatches>, { direction, match, sourceMatch }: RulePattern): boolean {
+  for (const row of matches.iterate(Number(direction === 'debit'), match)) {
+    if (ruleMatch(row.description)?.match !== sourceMatch) return true;
+  }
+  return false;
+}
 
 function categoryLabel(category: Category, parents: ReadonlyMap<string, string>) {
   const parent = category.parentId && parents.get(category.parentId);
@@ -72,10 +83,10 @@ function categoryId(db: Db, category: SuggestedCategory): string {
   return list.find((entry) => entry.parentId === null && entry.name === category.name && !entry.archived)!.id;
 }
 
-export function rulePattern(row: RuleEvidence) {
+export function rulePattern(row: RuleEvidence): RulePattern | null {
   const pattern = ruleMatch(row.description);
   return pattern && row.treatment === (row.amount < 0 ? 'expense' : 'income')
-    ? { match: pattern.text, operator: pattern.operator, direction: direction(row.amount) }
+    ? { ...pattern, sourceMatch: pattern.match, direction: direction(row.amount) }
     : null;
 }
 
@@ -95,15 +106,16 @@ export function resolveCategoryChoice(
   return choice;
 }
 
-export function saveApprovedRules(db: Db, approvals: { pattern: Parameters<typeof ruleConditions>[0]; categoryId: string }[]) {
+export function saveApprovedRules(db: Db, approvals: { pattern: RulePattern; categoryId: string }[]) {
   const existing = new Set(listRules(db).map((rule) => conditionKey(rule.conditions)));
   const created = new Set<string>();
+  const matchingRows = ledgerMatches(db);
   for (const { pattern, categoryId } of approvals) {
     const conditions = ruleConditions(pattern);
     const key = conditionKey(conditions);
-    if (existing.has(key)) continue;
+    if (existing.has(key) || overlapsLedger(matchingRows, pattern)) continue;
     const id = randomUUID();
-    saveRule(db, { id, conditions, categoryId, name: pattern.match.slice(0, 80), priority: 9000, enabled: true });
+    saveRule(db, { id, conditions, categoryId, name: pattern.name, priority: 9000, enabled: true });
     created.add(id);
     existing.add(key);
   }
@@ -124,7 +136,7 @@ function fingerprint(row: TransactionDetail) {
 
 export class AiCategorization {
   private transaction?: Pending<AiClassification & { id: string; fingerprint: string }>;
-  private rules?: Pending<AiRules>;
+  private rules?: Pending<{ token: string; rules: RuleSuggestion[] }>;
   private epoch = 0;
 
   constructor(private readonly profiles: ProfileStore, private readonly client: AiClient = new OpenAiClient()) {}
@@ -159,7 +171,7 @@ export class AiCategorization {
     return this.status();
   }
 
-  private async request(profile: Profile, samples: ModelSample[]) {
+  private async request(profile: Profile, samples: ModelSample[], forRules = false) {
     const epoch = this.epoch;
     const all = categories(profile.db);
     const available = all.filter((category) => !category.archived && category.leaf &&
@@ -168,7 +180,7 @@ export class AiCategorization {
     const choices = available.map((category, code) => ({
       code, name: categoryLabel(category, parents), kind: category.kind as ModelSample['kind'],
     }));
-    const answers = await this.client.suggest(this.profiles.openAiKey(profile.id), samples, choices);
+    const answers = await this.client.suggest(this.profiles.openAiKey(profile.id), samples, choices, forRules);
     this.ensureCurrent(profile, epoch);
     return { answers, available, all, parents };
   }
@@ -239,13 +251,17 @@ export class AiCategorization {
     return this.rules.value;
   }
 
-  async suggestForRows(rows: RuleEvidence[]): Promise<AiRule[]> {
+  async suggestForRows(rows: RuleEvidence[]): Promise<RuleSuggestion[]> {
     const profile = this.profiles.active();
     const existing = new Set(listRules(profile.db).map((rule) => conditionKey(rule.conditions)));
     const grouped = new Map<string, RuleSample>();
+    const evidence = new Map<string, { description: string; match: string | undefined; direction: RulePattern['direction'] }>();
     for (const row of rows) {
       const sample = rulePattern(row);
-      const description = safeDescription(row.description);
+      const source = normalizeText(row.description);
+      const flow = direction(row.amount);
+      evidence.set(JSON.stringify([flow, source]), { description: source, match: sample?.match, direction: flow });
+      const description = sample && safeDescription(sample.match);
       if (!sample || !description) continue;
       const key = patternKey(sample);
       if (existing.has(key)) continue;
@@ -257,16 +273,34 @@ export class AiCategorization {
       .map((sample, index) => ({ ...sample, index }));
     if (!samples.length) return [];
     const payload = samples.map(({ index, description, kind, direction }) => ({ index, description, kind, direction }));
-    const { answers, available, all, parents } = await this.request(profile, payload);
+    const { answers, available, all, parents } = await this.request(profile, payload, true);
+    const matchingRows = ledgerMatches(profile.db);
+    const descriptions = [...evidence.values()];
+    const overlaps = (sample: RuleSample, match: string) =>
+      descriptions.some((row) => row.direction === sample.direction && row.match !== sample.match && row.description.includes(match)) ||
+      overlapsLedger(matchingRows, { ...sample, match });
     const used = new Set<number>();
-    const rules: AiRule[] = [];
+    const proposed = new Set<string>();
+    const rules: RuleSuggestion[] = [];
     for (const answer of answers) {
       const sample = samples[answer.index];
       if (!sample || used.has(sample.index)) continue;
       const category = proposal(answer, sample.kind, available, all, parents);
       if (!category) continue;
       used.add(sample.index);
-      rules.push({ index: sample.index, match: sample.match, operator: sample.operator, direction: sample.direction,
+      const shorter = answer.ruleMatch && shorterMatch(answer.ruleMatch, sample.match);
+      let match = shorter || sample.match;
+      if (overlaps(sample, match)) {
+        if (match === sample.match || overlaps(sample, sample.match)) continue;
+        match = sample.match;
+      }
+      const key = patternKey({ match, direction: sample.direction });
+      if (existing.has(key) || proposed.has(key)) continue;
+      proposed.add(key);
+      const name = answer.ruleName && /^[\p{L}\p{N}][\p{L}\p{N}\p{M} &'’().,-]*$/u.test(answer.ruleName)
+        && (normalizeText(answer.ruleName) !== sample.description || normalizeText(sample.name) === sample.description)
+        ? answer.ruleName : sample.name;
+      rules.push({ index: sample.index, name, match, sourceMatch: sample.sourceMatch, operator: 'contains', direction: sample.direction,
         samples: sample.samples, category, reason: answer.reason });
     }
     return rules;
@@ -281,9 +315,17 @@ export class AiCategorization {
     if (!rules.length || rules.length !== selection.size) throw new UserError('Select valid rule suggestions.');
     const result = db.transaction(() => {
       const existing = new Set(listRules(db).map((rule) => conditionKey(rule.conditions)));
+      const matchingRows = ledgerMatches(db);
+      const eligibleRows = db.prepare(eligibleSql).all() as PostedRow[];
+      const classifyExisting = categorizer(db);
       const approvals = rules.flatMap((rule) => {
-        if (existing.has(patternKey(rule))) return [];
-        const id = resolveCategoryChoice(db, selection.get(rule.index) ?? '', rule.category.kind, rule.category);
+        const choice = selection.get(rule.index);
+        if (!choice || existing.has(patternKey(rule))) return [];
+        if (overlapsLedger(matchingRows, rule)) throw new UserError('A transaction now overlaps a suggested rule. Generate new rule suggestions.');
+        const conditions = ruleConditions(rule);
+        const samples = eligibleRows.filter((row) => matches(row, conditions));
+        if (samples.length && samples.every((row) => classifyExisting(row).categoryId)) return [];
+        const id = resolveCategoryChoice(db, choice, rule.category.kind, rule.category);
         return id ? [{ pattern: rule, categoryId: id }] : [];
       });
       const created = saveApprovedRules(db, approvals);
@@ -291,7 +333,7 @@ export class AiCategorization {
       if (applyToImported && created.size) {
         const classify = categorizer(db);
         const update = db.prepare("UPDATE transactions SET category_id=?,classification='rule',rule_id=? WHERE id=?");
-        for (const row of db.prepare(eligibleSql).all() as PostedRow[]) {
+        for (const row of eligibleRows) {
           const suggestion = classify(row);
           if (!suggestion.ruleId || !created.has(suggestion.ruleId) || suggestion.treatment !== row.treatment) continue;
           classified += update.run(suggestion.categoryId, suggestion.ruleId, row.id).changes;

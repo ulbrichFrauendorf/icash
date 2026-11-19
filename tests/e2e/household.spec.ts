@@ -134,12 +134,16 @@ test('reviews OpenAI classifications and imported rules before saving', async ()
       globalThis.fetch = async (url, options) => {
         if (!String(url).startsWith('https://api.openai.com/v1/')) throw new Error('Unexpected network request');
         if (options?.method === 'GET') return Response.json({ id: 'gpt-4.1-mini' });
-        const { samples } = JSON.parse(JSON.parse(String(options?.body)).input) as {
+        const body = JSON.parse(String(options?.body));
+        const { samples } = JSON.parse(body.input) as {
           samples: { index: number; description: string }[];
         };
         const suggestions = samples.map((sample) => ({
           index: sample.index, category: null, reason: 'Merchant type.',
           newExpense: sample.description.includes('BAKERY') ? 'Bakery Visits' : 'Shoe Repairs',
+          ...(body.text.format.name === 'icash_rules' ? {
+            ruleName: sample.description.includes('COBBLER') ? 'Synthetic Cobbler' : null, ruleMatch: sample.description,
+          } : {}),
         }));
         return Response.json({ status: 'completed', output: [{ type: 'message',
           content: [{ type: 'output_text', text: JSON.stringify({ suggestions }) }] }] });
@@ -193,6 +197,8 @@ test('reviews OpenAI classifications and imported rules before saving', async ()
     await nav('Rules');
     await page.getByRole('button', { name: 'Suggest rules with AI' }).click();
     const rules = page.getByRole('dialog', { name: 'Review AI rule suggestions' });
+    await expect(rules.getByText('Synthetic Cobbler', { exact: true })).toBeVisible();
+    await expect(rules.getByText('Description contains SYNTHETIC COBBLER', { exact: true })).toBeVisible();
     await expect(rules.getByRole('button', { name: /Category for SYNTHETIC COBBLER:.*Shoe Repairs/ })).toBeVisible();
     await rules.getByRole('button', { name: 'Save and apply to uncategorized' }).click();
     await expect(page.getByText('Saved 1 rule and categorized 1 imported transaction.')).toBeVisible();

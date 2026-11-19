@@ -21,8 +21,9 @@ export type SuggestedCategory = {
 export type AiClassification = { token: string; category: SuggestedCategory; reason: string; ruleId?: string };
 export type AiRule = {
   index: number;
+  name: string;
   match: string;
-  operator: 'contains' | 'equals';
+  operator: 'contains';
   direction: 'debit' | 'credit';
   samples: number;
   category: SuggestedCategory;

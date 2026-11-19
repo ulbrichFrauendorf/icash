@@ -9,8 +9,8 @@ import { cents, normalizeText } from '../../shared/finance';
 import { UserError } from '../../shared/schema';
 import { categorizer } from '../categorization/main';
 import { mapping as mappingSchema, type AuditRow, type Batch, type Candidate, type FilePreview, type ImportPreview, type ImportReviewRow, type ImportReviewPage, type ImportResult, type Mapping, type RowPreview, type commitInput, type decodeInput } from './contract';
-import type { AiRule, CategoryChoice } from '../openai/contract';
-import { patternKey, resolveCategoryChoice, rulePattern, saveApprovedRules } from '../openai/main';
+import type { CategoryChoice } from '../openai/contract';
+import { patternKey, resolveCategoryChoice, rulePattern, saveApprovedRules, type RuleSuggestion } from '../openai/main';
 import { statementLimit } from './contract';
 import { matchKey, normalizeRow, suggestFormats, suggestMapping } from './domain';
 
@@ -20,9 +20,12 @@ const hash = (value: string | Buffer) => createHash('sha256').update(value).dige
 
 type ParsedRow = { original: string[]; row: number };
 type PreparedRow = RowPreview & { matchedId?: string; matchedRow?: number };
+type ReviewPattern = NonNullable<ReturnType<typeof rulePattern>>;
 type Session = {
   profileId: string; accountId: string; fileName: string; hash: string; bytes: Buffer;
-  preview?: { version: string; mapping: Mapping; rows: PreparedRow[]; ledgerVersion: number; review?: { rows: Map<number, ImportReviewRow>; suggested: number; notice?: string } };
+  preview?: { version: string; mapping: Mapping; rows: PreparedRow[]; ledgerVersion: number; review?: {
+    rows: Map<number, ImportReviewRow>; patterns: Map<number, ReviewPattern>; suggested: number; notice?: string;
+  } };
 };
 type Existing = Candidate & { id: string };
 type DuplicateMatch = { balance: number | null; matchedId?: string; matchedRow?: number };
@@ -259,17 +262,19 @@ export class Imports {
     });
   }
 
-  setReview(profileId: string, token: string, version: string, rows: ImportReviewRow[], rules: AiRule[], notice?: string) {
+  setReview(profileId: string, token: string, version: string, rows: ImportReviewRow[], rules: RuleSuggestion[], notice?: string) {
     const { preview } = this.currentPreview(profileId, token, version);
-    const byPattern = new Map(rules.map((rule) => [patternKey(rule), rule.category]));
+    const byPattern = new Map(rules.map((rule) => [patternKey({ match: rule.sourceMatch, direction: rule.direction }), rule]));
+    const patterns = new Map<number, ReviewPattern>();
     let suggested = 0;
     const reviewed = new Map(rows.map((row) => {
       const pattern = rulePattern(row);
-      const suggestion = pattern ? byPattern.get(patternKey(pattern)) : undefined;
-      if (suggestion) suggested++;
-      return [row.row, { ...row, suggestion }];
+      const rule = pattern ? byPattern.get(patternKey(pattern)) : undefined;
+      if (pattern) patterns.set(row.row, rule ?? pattern);
+      if (rule) suggested++;
+      return [row.row, { ...row, suggestion: rule?.category }];
     }));
-    preview.review = { rows: reviewed, suggested, notice };
+    preview.review = { rows: reviewed, patterns, suggested, notice };
     return this.reviewPage(profileId, token, version, 0);
   }
 
@@ -314,7 +319,7 @@ export class Imports {
         if (!reviewed?.has(row)) throw new UserError('Only uncategorized transactions can be updated during import.');
       }
       const resolved = new Map<string, string | null>();
-      const ruleApprovals = new Map<string, { pattern: NonNullable<ReturnType<typeof rulePattern>>; categories: Set<string | null> }>();
+      const ruleApprovals = new Map<string, { pattern: ReviewPattern; categories: Set<string | null> }>();
       const insert = db.prepare(`INSERT INTO transactions(id,account_id,batch_id,date,amount,description,normalized,balance,reference,
           treatment,category_id,classification,rule_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`);
       const audit = db.prepare('INSERT INTO import_rows VALUES(?,?,?,?,?,?)');
@@ -335,7 +340,7 @@ export class Imports {
             const key = JSON.stringify([choice, reviewedRow.treatment, choice === 'suggested' ? reviewedRow.suggestion : undefined]);
             if (!resolved.has(key)) resolved.set(key, resolveCategoryChoice(db, choice, reviewedRow.treatment, reviewedRow.suggestion));
             selected = resolved.get(key) ?? null;
-            const pattern = input.review?.saveRules ? rulePattern(reviewedRow) : null;
+            const pattern = input.review?.saveRules ? preview.review?.patterns.get(row.row) : undefined;
             if (pattern) {
               const key = patternKey(pattern);
               const approval = ruleApprovals.get(key) ?? { pattern, categories: new Set<string | null>() };

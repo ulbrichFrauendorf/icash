@@ -237,7 +237,8 @@
         @for (rule of draft.rules; track rule.index) {
           <div class="list-row">
             <div>
-              <strong>{{ rule.operator === 'contains' ? 'Contains ' : 'Exactly matches ' }}{{ rule.match }}</strong>
+              <strong>{{ rule.name }}</strong>
+              <p>Description contains {{ rule.match }}</p>
               <p>{{ rule.direction }} · {{ rule.samples }} samples</p>
               @let choices = categoryOptions(rule);
               <i-select [label]="'Category for ' + rule.match" [options]="choices" optionLabel="label" [fluid]="true"

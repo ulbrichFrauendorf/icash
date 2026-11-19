@@ -308,6 +308,7 @@ it('proposes AI categories and rules from redacted statements and writes only af
     const suggestions = samples.map((sample) => ({
       index: sample.index, category: sample.description.includes('BAKERY') ? grocery.code : null,
       newExpense: sample.description.includes('COBBLER') ? 'Shoe Repairs' : null, reason: 'Merchant type.',
+      ...(body.text.format.name === 'icash_rules' ? { ruleName: 'Synthetic Cobbler', ruleMatch: 'SYNTHETIC COBBLER' } : {}),
     }));
     return Response.json({ status: 'completed', output: [{ type: 'message',
       content: [{ type: 'output_text', text: JSON.stringify({ suggestions }) }] }] });
@@ -345,14 +346,71 @@ it('proposes AI categories and rules from redacted statements and writes only af
 
   const suggestions = await ai.suggestRules();
   expect(suggestions.rules).toHaveLength(1);
-  expect(suggestions.rules[0]).toMatchObject({ match: 'SYNTHETIC COBBLER', operator: 'contains',
+  expect(suggestions.rules[0]).toMatchObject({ name: 'Synthetic Cobbler', match: 'SYNTHETIC COBBLER', operator: 'contains',
     category: { id: saved.categoryId, name: 'Shoe Repairs' } });
   expect(transaction('POS PURCHASE (EFFEC 01052025) SYNTHETIC COBBLER').categoryId).toBeNull();
   const result = ai.applyRules(suggestions.token, [{ index: suggestions.rules[0]!.index, choice: 'suggested' }], true);
   expect(result).toMatchObject({ created: 1, classified: 1 });
+  expect(result.rules).toContainEqual(expect.objectContaining({ name: 'Synthetic Cobbler',
+    conditions: { field: 'description', operator: 'contains', text: 'SYNTHETIC COBBLER', direction: 'debit' } }));
   expect(transaction('MANUAL BAKERY').categoryId).toBeNull();
   expect((await ai.suggestRules()).rules).toHaveLength(0);
   expect(ai.disconnect().connected).toBe(false);
+});
+
+it('names AI rules and keeps a longer match when shortening would overlap another description', async () => {
+  const payment = 'DIGITAL PAYMENT DT ABSA BANK TUIN';
+  const restaurant = 'KFC STORMVOEL ROAD GAUTE CARD NO';
+  const fee = 'TRANSACTION FEE DECL POS TRAN FEE (EFF:170926 AMT: 0,00 )';
+  const otherFee = 'TRANSACTION FEE MONTHLY';
+  const vet = 'FRY DIEREKLINIEK PRETO CARD NO';
+  const shop = 'NORTH MARKET OLD TOWN CARD NO';
+  const otherShop = 'NORTH MARKETPLACE';
+  const overlapping = 'CENTRAL DEPOT';
+  const overlapFee = 'CENTRAL DEPOT FEE';
+  const main = account();
+  const statement = file('ai-rules.csv', ['Date,Description,Amount',
+    ...[payment, restaurant, fee, otherFee, vet, shop, otherShop, overlapping, overlapFee]
+      .map((description) => `20250501,"${description}",-20.00`),
+  ].join('\n'));
+  await importFile(statement, main.id);
+  const unrelated = transactionDetail(db(), transaction(otherShop).id);
+  saveTransaction(db(), { ...unrelated, categoryId: category('Fuel').id, confirmClassification: true });
+  const answers = new Map([
+    [payment, { ruleName: 'Tuin', ruleMatch: 'TUIN' }],
+    ['KFC STORMVOEL ROAD GAUTE', { ruleName: 'KFC', ruleMatch: 'KFC' }],
+    ['TRANSACTION FEE DECL POS TRAN FEE', { ruleName: 'Transaction Fee Decl', ruleMatch: 'TRANSACTION FEE DECL' }],
+    ['FRY DIEREKLINIEK PRETO', { ruleName: 'Fry Dierekliniek', ruleMatch: 'FRY DIEREKLINIEK' }],
+    ['NORTH MARKET OLD TOWN', { ruleName: 'North Market', ruleMatch: 'NORTH MARKET' }],
+    [overlapping, { ruleName: 'Central Depot', ruleMatch: overlapping }],
+  ]);
+  const ai = new AiCategorization(store, {
+    async test() {},
+    async suggest(_key, samples) {
+      return samples.flatMap(({ index, description }) => {
+        const answer = answers.get(description);
+        return answer ? [{ index, ...answer, category: null, newExpense: 'Test Expenses', reason: '' }] : [];
+      });
+    },
+  });
+  await ai.connect('sk-icash-synthetic-key');
+  const { token, rules } = await ai.suggestRules();
+  expect(rules.map(({ name, match, operator }) => [name, match, operator])).toEqual(expect.arrayContaining([
+    ['Tuin', 'TUIN', 'contains'],
+    ['KFC', 'KFC', 'contains'],
+    ['Transaction Fee Decl', 'TRANSACTION FEE DECL', 'contains'],
+    ['Fry Dierekliniek', 'FRY DIEREKLINIEK', 'contains'],
+    ['North Market', 'NORTH MARKET OLD TOWN', 'contains'],
+  ]));
+  expect(rules).toHaveLength(5);
+  const saved = ai.applyRules(token, rules.map(({ index }) => ({ index, choice: 'suggested' })), true);
+  expect(saved).toMatchObject({ created: 5, classified: 5 });
+  expect(transaction(otherFee).categoryId).toBeNull();
+  expect(transaction(otherShop).categoryId).toBe(category('Fuel').id);
+  expect(transaction(overlapFee).categoryId).toBeNull();
+  const laterFee = fee.replace('170926', '180926');
+  await importFile(file('later.csv', `Date,Description,Amount\n20250502,"${laterFee}",-20.00`), main.id);
+  expect(transaction(laterFee)).toMatchObject({ categoryId: category('Test Expenses').id, classification: 'rule' });
 });
 
 it('rejects unsuccessful OpenAI responses without storing the failed key', async () => {
@@ -411,9 +469,9 @@ it('reviews only new uncategorized statement rows and saves consistent overrides
   const contents = [
     'Date,Description,Amount,Balance',
     '20250501,Checkers groceries,-10.00,90.00',
-    '20250501,Synthetic shop,-20.00,70.00',
-    '20250501,Synthetic shop,-20.00,50.00',
-    '20250501,Synthetic shop,-20.00,50.00',
+    '20250501,Synthetic shop Rivonia CARD NO,-20.00,70.00',
+    '20250501,Synthetic shop Rivonia CARD NO,-20.00,50.00',
+    '20250501,Synthetic shop Rivonia CARD NO,-20.00,50.00',
   ].join('\n');
   const selected = imports.selectBytes(db(), active().id, main.id, 'review.csv', Buffer.from(contents));
   const { token, suggested, delimiter, encoding, header } = selected;
@@ -421,14 +479,17 @@ it('reviews only new uncategorized statement rows and saves consistent overrides
   const rows = imports.uncategorized(db(), active().id, token, statement.version);
   expect(rows.map(({ row }) => row)).toEqual([3, 4]);
   const reviewed = imports.setReview(active().id, token, statement.version, rows, [{
-    index: 0, match: 'SYNTHETIC SHOP', operator: 'equals', direction: 'debit', samples: 2, reason: '',
+    index: 0, name: 'Synthetic Shop', match: 'SYNTHETIC SHOP', sourceMatch: 'SYNTHETIC SHOP RIVONIA',
+    operator: 'contains', direction: 'debit', samples: 2, reason: '',
     category: { id: fuel.id, label: fuel.name, name: fuel.name, kind: 'expense' },
   }]);
   expect(reviewed.suggested).toBe(2);
   const result = imports.commit(db(), active().id, { token, version: statement.version, acceptRejected: false,
     review: { changes: [{ row: 3, choice: groceries.id }, { row: 4, choice: groceries.id }], saveRules: true } });
   expect(result).toMatchObject({ inserted: 3, duplicate: 1, rulesSaved: 1 });
-  const shop = transactions().filter((row) => row.description === 'Synthetic shop');
+  const shop = transactions().filter((row) => row.description === 'Synthetic shop Rivonia CARD NO');
   expect(shop.map((row) => row.categoryId)).toEqual([groceries.id, groceries.id]);
-  expect(listRules(db()).find((rule) => rule.conditions.text === 'SYNTHETIC SHOP')?.categoryId).toBe(groceries.id);
+  expect(listRules(db()).find((rule) => rule.conditions.text === 'SYNTHETIC SHOP')).toMatchObject({
+    categoryId: groceries.id, name: 'Synthetic Shop', conditions: { field: 'description', operator: 'contains' },
+  });
 });
