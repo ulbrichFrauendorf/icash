@@ -1,5 +1,5 @@
 const { join } = require('node:path');
-const branding = join(__dirname, 'src/app/renderer/assets/branding/invensys.ico');
+const branding = join(__dirname, 'src/app/renderer/assets/branding/invensys-icon-dark.ico');
 
 module.exports = {
   // The encrypted SQLite driver ships platform Node-API binaries shared by Node and Electron.

@@ -33,6 +33,7 @@ let window: BrowserWindow | null = null;
 let profiles: ProfileStore | undefined;
 const appUrl = 'icash://app/';
 const renderer = resolve(__dirname, '../renderer/browser');
+const windowIcon = join(renderer, 'assets/branding/invensys-icon-dark.png');
 
 const protect: KeyProtection = {
   wrap(key) {
@@ -56,7 +57,9 @@ function showWindow() {
   window = new BrowserWindow({
     width: 1320, height: 860, minWidth: 730, minHeight: 550, title: 'iCash',
     backgroundColor: '#f3f6f3', autoHideMenuBar: true,
-    icon: join(renderer, "assets/branding/invensys-icon-light.png"),
+    icon: windowIcon,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#1a2535', symbolColor: '#edf2fa', height: 32 },
     webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false },
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -68,6 +71,7 @@ function showWindow() {
 if (app.requestSingleInstanceLock()) {
   app.on('second-instance', () => { if (window?.isMinimized()) window.restore(); window?.focus(); });
   app.whenReady().then(() => {
+    app.dock?.setIcon(windowIcon);
     if (testRoot && process.platform === 'linux') safeStorage.setUsePlainTextEncryption(true);
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     session.defaultSession.setPermissionCheckHandler(() => false);
