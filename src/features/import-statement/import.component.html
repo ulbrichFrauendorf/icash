@@ -2,33 +2,17 @@
   <div class="page-heading">
     <div>
       <h1>Import statements</h1>
-      <p>Review an Absa CSV before adding it to your ledger.</p>
+      <p>Drop an Absa statement, then review categories before importing. With OpenAI connected, validation requests suggestions for uncategorized rows.</p>
     </div>
   </div>
   <i-card class="surface">
     <div class="stack">
-      <h2>1. Choose a statement</h2>
+      <h2>Statement file</h2>
       <div class="actions">
-        @let choices1 =
-          [
-            { value: '', label: 'Select account' },
-            ...rowChoices(accounts(), 'id', 'name'),
-          ];
-        <i-select
-          label="Destination account"
-          [options]="choices1"
-          optionLabel="label"
-          [fluid]="true"
-          [ngModel]="selected(choices1, account)"
-          (ngModelChange)="account = $event.value; reset()"
-        />
-        <i-button
-          [disabled]="!account || ui.busy()"
-          (clicked)="choose()"
-          severity="primary"
-        >
-          Choose CSV
-        </i-button>
+        @let destinationChoices = [{ value: '', label: 'Select account' }, ...rowChoices(accounts(), 'id', 'name')];
+        <i-select label="Destination account" [options]="destinationChoices" optionLabel="label" [fluid]="true"
+          [disabled]="ui.busy()" [ngModel]="selected(destinationChoices, account)"
+          (ngModelChange)="account = $event.value; reset()" />
         @if (!accounts().length) {
           <i-button
             (clicked)="ui.go('Accounts')"
@@ -39,13 +23,17 @@
           </i-button>
         }
       </div>
+      <i-file-upload [files]="files" [options]="uploadOptions" [disabled]="!account || ui.busy()"
+        dropLabel="Drop an Absa statement here"
+        [description]="account ? 'or choose a CSV or TXT file' : 'Select the destination account first'"
+        chooseLabel="Browse files" ariaLabel="Choose a statement file" fileIcon="pi pi-file" (filesChange)="selectFiles($event)" />
     </div>
   </i-card>
   @if (file; as current) {
     <i-card class="surface">
       <div class="stack">
         <div class="section-header">
-          <h2>2. Map columns</h2>
+          <h2>Map columns</h2>
           <i-button
             [disabled]="ui.busy()"
             (clicked)="cancel()"
@@ -68,6 +56,7 @@
             [options]="choices2"
             optionLabel="label"
             [fluid]="true"
+            [disabled]="ui.busy()"
             [ngModel]="selected(choices2, delimiter)"
             (ngModelChange)="delimiter = $event.value; invalidate()"
           />
@@ -82,6 +71,7 @@
             [options]="choices3"
             optionLabel="label"
             [fluid]="true"
+            [disabled]="ui.busy()"
             [ngModel]="selected(choices3, encoding)"
             (ngModelChange)="encoding = $event.value; invalidate()"
           />
@@ -90,6 +80,7 @@
             label="Header record"
             type="number"
             [fluid]="true"
+            [disabled]="ui.busy()"
             [ngModel]="header"
             (ngModelChange)="header = +$event; invalidate()"
           />
@@ -118,6 +109,7 @@
             [options]="choices4"
             optionLabel="label"
             [fluid]="true"
+            [disabled]="ui.busy()"
             [ngModel]="selected(choices4, layout)"
             (ngModelChange)="layout = $event.value; invalidate()"
           />
@@ -133,6 +125,7 @@
             [options]="choices5"
             optionLabel="label"
             [fluid]="true"
+            [disabled]="ui.busy()"
             [ngModel]="selected(choices5, dateFormat)"
             (ngModelChange)="dateFormat = $event.value; invalidate()"
           />
@@ -147,11 +140,13 @@
             [options]="choices6"
             optionLabel="label"
             [fluid]="true"
+            [disabled]="ui.busy()"
             [ngModel]="selected(choices6, decimal)"
             (ngModelChange)="decimal = $event.value; invalidate()"
           />
           <i-checkbox
             label="Invert amount signs"
+            [disabled]="ui.busy()"
             [(ngModel)]="invert"
             (ngModelChange)="invalidate()"
           />
@@ -168,19 +163,24 @@
               [options]="choices7"
               optionLabel="label"
               [fluid]="true"
+              [disabled]="ui.busy()"
               [ngModel]="selected(choices7, columns[key])"
               (ngModelChange)="columns[key] = $event.value; invalidate()"
             />
           }
         </div>
-        <div>
+        <div class="actions">
           <i-button
             [disabled]="!dateFormat || !decimal || ui.busy()"
+            [loading]="validating"
             (clicked)="validate()"
             severity="primary"
           >
             Validate statement
           </i-button>
+          @if (validating) {
+            <span role="status">Validating the statement and checking for category suggestions…</span>
+          }
         </div>
       </div>
     </i-card>
@@ -188,7 +188,7 @@
   @if (preview; as data) {
     <i-card class="surface">
       <div class="stack">
-        <h2>3. Review and import</h2>
+        <h2>Review and import</h2>
         <div class="summary">
           {{ data.counts.accepted }} ready ·
           {{ data.counts.duplicate }} duplicates skipped ·
@@ -211,10 +211,6 @@
             >
               Export rejected rows
             </i-button>
-            <i-checkbox
-              label="Continue with valid rows"
-              [(ngModel)]="acceptRejected"
-            />
           </div>
         }
         @if (data.counts.duplicate) {
@@ -231,13 +227,13 @@
           height="20rem"
         />
         <div class="actions">
-          <i-button
-            [disabled]="ui.busy() || (!!data.counts.rejected && !acceptRejected)"
-            (clicked)="commit()"
-            severity="primary"
-          >
-            Import new rows
-          </i-button>
+          @if (data.review) {
+            <i-button [disabled]="ui.busy()" (clicked)="openReview()">Review categories</i-button>
+          } @else {
+            <i-button [disabled]="ui.busy() || (!data.counts.accepted && !!data.counts.rejected)" (clicked)="commit()">
+              {{ data.counts.rejected ? 'Import valid rows' : 'Import new rows' }}
+            </i-button>
+          }
         </div>
       </div>
     </i-card>
@@ -297,4 +293,48 @@
       }
     </div>
   </i-card>
+  @if (review; as categoryReview) {
+    <i-dialog header="Review import categories" width="58rem" [visible]="true" [closable]="!ui.busy()"
+      (visibleChange)="!$event && (review = null)">
+      <div class="stack">
+        <p>{{ categoryReview.total }} uncategorized transactions · {{ categoryReview.suggested }} AI suggestions.
+          Change any category below or leave the transaction uncategorized. Importing applies the selections across all pages.</p>
+        @if (categoryReview.notice) {
+          <i-message severity="info">{{ categoryReview.notice }}</i-message>
+        }
+        @if (preview && preview.counts.rejected) {
+          <i-message severity="warning">{{ preview.counts.rejected }} rejected rows will be skipped.</i-message>
+        }
+        @for (row of categoryReview.rows; track row.row) {
+          @let choices = categoryOptions(row);
+          <div class="list-row import-category-row">
+            <div>
+              <strong>{{ row.description }}</strong>
+              <div class="muted">Row {{ row.row }} · {{ row.date }} · {{ row.amount | zar }}</div>
+            </div>
+            <i-select [label]="'Category for row ' + row.row" [options]="choices" optionLabel="label" [fluid]="true"
+              [disabled]="ui.busy()" [ngModel]="selected(choices, categorySelection(row))"
+              (ngModelChange)="chooseCategory(row.row, $event.value)" />
+          </div>
+        }
+        @if (categoryReview.total > categoryReview.size) {
+          <div class="actions">
+            <i-button severity="secondary" [disabled]="ui.busy() || !categoryReview.page" (clicked)="showReviewPage(categoryReview.page - 1)">Previous</i-button>
+            <span>Page {{ categoryReview.page + 1 }}</span>
+            <i-button severity="secondary" [disabled]="ui.busy() || (categoryReview.page + 1) * categoryReview.size >= categoryReview.total"
+              (clicked)="showReviewPage(categoryReview.page + 1)">Next</i-button>
+          </div>
+        }
+        <p class="muted">Selected new expense categories are created on import. Saving rules uses only transaction patterns with a consistent category.</p>
+        @if (ui.error(); as error) {
+          <i-message severity="danger">{{ error }}</i-message>
+        }
+      </div>
+      <div slot="footer" class="actions">
+        <i-button severity="secondary" [disabled]="ui.busy()" (clicked)="review = null">Back</i-button>
+        <i-button severity="secondary" [outlined]="true" [disabled]="ui.busy()" (clicked)="commit()">Import transactions</i-button>
+        <i-button [disabled]="ui.busy()" (clicked)="commit(true)">Import and save rules</i-button>
+      </div>
+    </i-dialog>
+  }
 </div>

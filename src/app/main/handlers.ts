@@ -11,7 +11,7 @@ import { mergeInput, saveCategoryInput } from '../../features/categories/contrac
 import { portableTemplate, Templates } from '../../features/categories/portable';
 import { merchantInput, saveRuleInput } from '../../features/categorization/contract';
 import { listRules, recategorize, saveMerchant, saveRule } from '../../features/categorization/main';
-import { commitInput, decodeInput, previewInput } from '../../features/import-statement/contract';
+import { commitInput, decodeInput, importReviewInput, previewInput, selectImportInput } from '../../features/import-statement/contract';
 import { auditRows, batches, Imports } from '../../features/import-statement/main';
 import { allocationInput, closeInput, copyInput, defaultInput, monthInput } from '../../features/monthly-budget/contract';
 import { copyBudget, getBudget, recommend, saveAllocation, saveDefault, setClosed } from '../../features/monthly-budget/main';
@@ -145,15 +145,27 @@ export function registerHandlers(profiles: ProfileStore, window: () => BrowserWi
     } finally { await handle.close(); }
   });
   handle('commitTemplate', profileIdInput, ({ id }) => templates.commit(db(), active().id, id));
-  handle('selectImport', profileIdInput, async ({ id }) => {
-    const profile = active();
-    const file = await pick('Choose bank statement', ['csv', 'txt']);
-    if (!file) return null;
-    if (active().id !== profile.id) throw new UserError('The active profile changed.');
-    return imports.select(profile.db, profile.id, id, file);
-  });
+  handle('selectImport', selectImportInput, ({ id, name, bytes }) => imports.selectBytes(db(), active().id, id, name, bytes));
   handle('decodeImport', decodeInput, (input) => imports.decode(db(), active().id, input));
-  handle('previewImport', previewInput, ({ token, mapping }) => imports.preview(db(), active().id, token, mapping));
+  handle('previewImport', previewInput, async ({ token, mapping }) => {
+    const profile = active();
+    const preview = imports.preview(profile.db, profile.id, token, mapping);
+    const rows = imports.uncategorized(profile.db, profile.id, token, preview.version);
+    if (!rows.length) return preview;
+    const connected = ai.status().connected;
+    let suggestions: Awaited<ReturnType<typeof ai.suggestForRows>> = [];
+    let notice = connected ? undefined : 'Connect OpenAI in Settings for suggestions. You can choose categories here.';
+    if (connected) {
+      try { suggestions = await ai.suggestForRows(rows); }
+      catch (error) {
+        if (!(error instanceof UserError)) throw error;
+        notice = error.message + ' You can choose categories here.';
+      }
+    }
+    return { ...preview, review: imports.setReview(profile.id, token, preview.version, rows, suggestions, notice) };
+  });
+  handle('importReviewPage', importReviewInput, ({ token, version, page }) =>
+    imports.reviewPage(active().id, token, version, page));
   handle('commitImport', commitInput, (input) => imports.commit(db(), active().id, input));
   handle('cancelImport', profileIdInput, ({ id }) => { imports.cancel(active().id, id); });
   handle('exportErrors', profileIdInput, ({ id }) => saveText('Export rejected rows', 'icash-import-errors.csv', () =>

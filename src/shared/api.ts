@@ -3,7 +3,7 @@ import type { Account, coverageInput, saveAccountInput } from '../features/accou
 import type { Category, mergeInput, saveCategoryInput } from '../features/categories/contract';
 import type { TemplatePreview } from '../features/categories/portable';
 import type { merchantInput, Rule, RulePreview, saveRuleInput } from '../features/categorization/contract';
-import type { AuditRow, Batch, commitInput, decodeInput, FilePreview, ImportPreview, ImportResult, previewInput } from '../features/import-statement/contract';
+import type { AuditRow, Batch, commitInput, decodeInput, FilePreview, ImportPreview, ImportReviewPage, ImportResult, importReviewInput, previewInput, selectImportInput } from '../features/import-statement/contract';
 import type { allocationInput, Budget, closeInput, copyInput, defaultInput, Recommendations } from '../features/monthly-budget/contract';
 import type { AiClassification, AiRules, AiStatus, applyAiRulesInput, openAiKeyInput } from '../features/openai/contract';
 import type { createProfileInput, ProfileState, selectThemeInput } from '../features/profiles/contract';
@@ -41,9 +41,10 @@ export interface Requests {
   exportTemplate: [undefined, boolean];
   previewTemplate: [undefined, TemplatePreview | null];
   commitTemplate: [ID, TemplatePreview];
-  selectImport: [ID, FilePreview | null];
+  selectImport: [Data<typeof selectImportInput>, FilePreview];
   decodeImport: [Data<typeof decodeInput>, FilePreview];
   previewImport: [Data<typeof previewInput>, ImportPreview];
+  importReviewPage: [Data<typeof importReviewInput>, ImportReviewPage];
   commitImport: [Data<typeof commitInput>, ImportResult];
   cancelImport: [ID, void];
   exportErrors: [ID, boolean];
@@ -94,7 +95,7 @@ export const channels: { [K in keyof Requests]: K } = {
   categories: 'categories', saveCategory: 'saveCategory', categoryUsage: 'categoryUsage',
   mergeCategories: 'mergeCategories', restoreDefaults: 'restoreDefaults', exportTemplate: 'exportTemplate',
   previewTemplate: 'previewTemplate', commitTemplate: 'commitTemplate', selectImport: 'selectImport',
-  decodeImport: 'decodeImport', previewImport: 'previewImport', commitImport: 'commitImport', cancelImport: 'cancelImport', exportErrors: 'exportErrors',
+  importReviewPage: 'importReviewPage', decodeImport: 'decodeImport', previewImport: 'previewImport', commitImport: 'commitImport', cancelImport: 'cancelImport', exportErrors: 'exportErrors',
   batches: 'batches', audit: 'audit', transactions: 'transactions', transaction: 'transaction',
   saveTransaction: 'saveTransaction', rules: 'rules', saveRule: 'saveRule', deleteRule: 'deleteRule',
   saveMerchant: 'saveMerchant', previewRules: 'previewRules', applyRules: 'applyRules',

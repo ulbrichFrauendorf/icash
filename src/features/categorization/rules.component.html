@@ -57,7 +57,7 @@
           @let choices1 =
             [
               { value: '', label: 'Select category' },
-              ...rowChoices(categories(), 'id', categoryLabel),
+              ...rowChoices(editableCategories(), 'id', categoryLabel),
             ];
           <i-select
             label="Target category"
@@ -233,27 +233,30 @@
     <i-dialog header="Review AI rule suggestions" width="46rem" [visible]="true" [closable]="!ui.busy()"
       (visibleChange)="!$event && aiDraft.set(null)">
       <div class="stack">
-        <p>Select rules to save. Each selected rule applies to future matches. Any marked expense category will be created when you confirm.</p>
+        <p>Review each rule’s category. Change the category or skip the rule. New expense categories are created when you save.</p>
         @for (rule of draft.rules; track rule.index) {
           <div class="list-row">
             <div>
-              <i-checkbox [label]="(rule.operator === 'contains' ? 'Contains ' : 'Exactly matches ') + rule.match"
-                [ngModel]="selectedRules().has(rule.index)" (ngModelChange)="selectRule(rule.index, $event)" />
-              <p>{{ rule.direction }} · {{ rule.samples }} sample(s) · {{ rule.category.id ? 'Use ' : 'Create expense category ' }}{{ rule.category.label }}</p>
+              <strong>{{ rule.operator === 'contains' ? 'Contains ' : 'Exactly matches ' }}{{ rule.match }}</strong>
+              <p>{{ rule.direction }} · {{ rule.samples }} samples</p>
+              @let choices = categoryOptions(rule);
+              <i-select [label]="'Category for ' + rule.match" [options]="choices" optionLabel="label" [fluid]="true"
+                [ngModel]="selected(choices, selectedRules().get(rule.index) ?? '')"
+                (ngModelChange)="selectRule(rule.index, $event.value)" />
               @if (rule.reason) {
                 <p class="muted">{{ rule.reason }}</p>
               }
             </div>
           </div>
         }
-        <i-checkbox label="Also apply to matching uncategorized imported transactions" [(ngModel)]="applyToImported" />
         @if (ui.error(); as error) {
           <i-message severity="danger">{{ error }}</i-message>
         }
       </div>
       <div slot="footer" class="actions">
         <i-button severity="secondary" [outlined]="true" [disabled]="ui.busy()" (clicked)="aiDraft.set(null)">Cancel</i-button>
-        <i-button [disabled]="ui.busy() || !selectedRules().size" (clicked)="saveAiRules(draft)">Save selected rules</i-button>
+        <i-button severity="secondary" [outlined]="true" [disabled]="ui.busy() || !hasSelectedRules()" (clicked)="saveAiRules(draft, false)">Save rules</i-button>
+        <i-button [disabled]="ui.busy() || !hasSelectedRules()" (clicked)="saveAiRules(draft, true)">Save and apply to uncategorized</i-button>
       </div>
     </i-dialog>
   }

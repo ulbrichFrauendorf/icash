@@ -11,12 +11,13 @@ import type { ProfileStore } from '../profiles/main';
 import { saveTransaction, transactionDetail } from '../transactions/main';
 import type { TransactionDetail } from '../transactions/contract';
 import { OpenAiClient, type AiClient, type ModelSample, type ModelSuggestion } from './client';
-import type { AiClassification, AiRule, AiRules, SuggestedCategory } from './contract';
+import type { AiClassification, AiRule, AiRules, CategoryChoice, SuggestedCategory } from './contract';
 import { ruleMatch, safeDescription } from './descriptions';
 
 const limit = 24;
 type Profile = ReturnType<ProfileStore['active']>;
-type PostedRow = Classifiable & { id: string; treatment: 'expense' | 'income' };
+export type RuleEvidence = { description: string; amount: number; treatment: 'expense' | 'income' };
+type PostedRow = Classifiable & RuleEvidence & { id: string };
 type RuleSample = ModelSample & { match: string; operator: 'contains' | 'equals'; samples: number };
 type Pending<T> = { db: Db; value: T };
 
@@ -69,6 +70,44 @@ function categoryId(db: Db, category: SuggestedCategory): string {
   const list = saveCategory(db, { parentId: null, kind: 'expense', name: category.name, colour: '#278473',
     icon: '', sort: 0, archived: false, excludeReports: false });
   return list.find((entry) => entry.parentId === null && entry.name === category.name && !entry.archived)!.id;
+}
+
+export function rulePattern(row: RuleEvidence) {
+  const pattern = ruleMatch(row.description);
+  return pattern && row.treatment === (row.amount < 0 ? 'expense' : 'income')
+    ? { match: pattern.text, operator: pattern.operator, direction: direction(row.amount) }
+    : null;
+}
+
+export const patternKey = (rule: Parameters<typeof ruleConditions>[0]) => conditionKey(ruleConditions(rule));
+
+export function resolveCategoryChoice(
+  db: Db, choice: CategoryChoice, kind: SuggestedCategory['kind'], suggested?: SuggestedCategory,
+): string | null {
+  if (!choice) return null;
+  if (choice === 'suggested') {
+    if (!suggested || suggested.kind !== kind) throw new UserError('The suggested category is no longer available.');
+    return categoryId(db, suggested);
+  }
+  if (!categories(db).some((category) => category.id === choice && category.kind === kind && category.leaf && !category.archived)) {
+    throw new UserError('Choose an active category of the matching type.');
+  }
+  return choice;
+}
+
+export function saveApprovedRules(db: Db, approvals: { pattern: Parameters<typeof ruleConditions>[0]; categoryId: string }[]) {
+  const existing = new Set(listRules(db).map((rule) => conditionKey(rule.conditions)));
+  const created = new Set<string>();
+  for (const { pattern, categoryId } of approvals) {
+    const conditions = ruleConditions(pattern);
+    const key = conditionKey(conditions);
+    if (existing.has(key)) continue;
+    const id = randomUUID();
+    saveRule(db, { id, conditions, categoryId, name: pattern.match.slice(0, 80), priority: 9000, enabled: true });
+    created.add(id);
+    existing.add(key);
+  }
+  return created;
 }
 
 function transactionForAi(db: Db, id: string) {
@@ -168,16 +207,21 @@ export class AiCategorization {
   async suggestRules(): Promise<AiRules> {
     const profile = this.profiles.active();
     this.rules = undefined;
+    const rows = profile.db.prepare(eligibleSql + ' ORDER BY t.date DESC,t.id LIMIT 500').all() as PostedRow[];
+    const rules = await this.suggestForRows(rows);
+    this.rules = { db: profile.db, value: { token: randomUUID(), rules } };
+    return this.rules.value;
+  }
+
+  async suggestForRows(rows: RuleEvidence[]): Promise<AiRule[]> {
+    const profile = this.profiles.active();
     const existing = new Set(listRules(profile.db).map((rule) => conditionKey(rule.conditions)));
     const grouped = new Map<string, RuleSample>();
-    const rows = profile.db.prepare(eligibleSql + ' ORDER BY t.date DESC,t.id LIMIT 500').all() as PostedRow[];
     for (const row of rows) {
-      if (row.treatment !== (row.amount < 0 ? 'expense' : 'income')) continue;
-      const pattern = ruleMatch(row.description);
+      const sample = rulePattern(row);
       const description = safeDescription(row.description);
-      if (!pattern || !description) continue;
-      const sample = { match: pattern.text, operator: pattern.operator, direction: direction(row.amount) };
-      const key = conditionKey(ruleConditions(sample));
+      if (!sample || !description) continue;
+      const key = patternKey(sample);
       if (existing.has(key)) continue;
       const group = grouped.get(key);
       if (group) group.samples++;
@@ -185,46 +229,36 @@ export class AiCategorization {
     }
     const samples = [...grouped.values()].sort((a, b) => b.samples - a.samples).slice(0, limit)
       .map((sample, index) => ({ ...sample, index }));
-    const token = randomUUID();
+    if (!samples.length) return [];
+    const payload = samples.map(({ index, description, kind, direction }) => ({ index, description, kind, direction }));
+    const { answers, available, all, parents } = await this.request(profile, payload);
+    const used = new Set<number>();
     const rules: AiRule[] = [];
-    if (samples.length) {
-      const payload = samples.map(({ index, description, kind, direction }) => ({ index, description, kind, direction }));
-      const { answers, available, all, parents } = await this.request(profile, payload);
-      const used = new Set<number>();
-      for (const answer of answers) {
-        const sample = samples[answer.index];
-        if (!sample || used.has(sample.index)) continue;
-        const category = proposal(answer, sample.kind, available, all, parents);
-        if (!category) continue;
-        used.add(sample.index);
-        rules.push({ index: sample.index, match: sample.match, operator: sample.operator, direction: sample.direction,
-          samples: sample.samples, category, reason: answer.reason });
-      }
+    for (const answer of answers) {
+      const sample = samples[answer.index];
+      if (!sample || used.has(sample.index)) continue;
+      const category = proposal(answer, sample.kind, available, all, parents);
+      if (!category) continue;
+      used.add(sample.index);
+      rules.push({ index: sample.index, match: sample.match, operator: sample.operator, direction: sample.direction,
+        samples: sample.samples, category, reason: answer.reason });
     }
-    this.rules = { db: profile.db, value: { token, rules } };
-    return this.rules.value;
+    return rules;
   }
 
-  applyRules(token: string, selected: number[], applyToImported: boolean) {
+  applyRules(token: string, selected: { index: number; choice: CategoryChoice }[], applyToImported: boolean) {
     const db = this.profiles.active().db;
     const pending = this.rules;
     if (!pending || pending.db !== db || pending.value.token !== token) throw new UserError('Generate new rule suggestions first.');
-    const selection = new Set(selected);
+    const selection = new Map(selected.map(({ index, choice }) => [index, choice]));
     const rules = pending.value.rules.filter((rule) => selection.has(rule.index));
     if (!rules.length || rules.length !== selection.size) throw new UserError('Select valid rule suggestions.');
     const result = db.transaction(() => {
-      const existing = new Set(listRules(db).map((rule) => conditionKey(rule.conditions)));
-      const created = new Set<string>();
-      for (const rule of rules) {
-        const conditions = ruleConditions(rule);
-        const key = conditionKey(conditions);
-        if (existing.has(key)) continue;
-        const id = randomUUID();
-        saveRule(db, { id, conditions, categoryId: categoryId(db, rule.category), name: rule.match.slice(0, 80),
-          priority: 9000, enabled: true });
-        created.add(id);
-        existing.add(key);
-      }
+      const approvals = rules.flatMap((rule) => {
+        const id = resolveCategoryChoice(db, selection.get(rule.index) ?? '', rule.category.kind, rule.category);
+        return id ? [{ pattern: rule, categoryId: id }] : [];
+      });
+      const created = saveApprovedRules(db, approvals);
       let classified = 0;
       if (applyToImported && created.size) {
         const classify = categorizer(db);

@@ -27,7 +27,7 @@ On Windows, run `npm run make` and install the generated Squirrel setup executab
 ## Household workflow
 
 1. Create a household. The suggested categories and rules are editable. Each household has its own database.
-2. Set up an account for each bank account or credit card. In **Import statements**, choose a CSV, review the detected columns and formats, and validate the preview. Absa posting dates such as `YYYYMMDD` are recognized automatically. The included synthetic fixtures exercise signed amounts and separate debit and credit columns. Absa layouts can vary. Exports are limited to 12 MiB, 60,000 records, 128 columns, and 16,384 characters per record.
+2. Set up an account for each bank account or credit card. In **Import statements**, drop a CSV or browse for it, review the detected columns and formats, and validate the preview. Absa posting dates such as `YYYYMMDD` are recognized automatically. The included synthetic fixtures exercise signed amounts and separate debit and credit columns. Absa layouts can vary. Exports are limited to 12 MiB, 60,000 records, 128 columns, and 16,384 characters per record.
 3. iCash skips re-imported rows, repeated transactions in a statement, and matches that lack a running balance to distinguish them. Same-day purchases with the same description and amount remain separate when both running balances are present and differ. Review rejected rows or export them for correction. In **Accounts**, confirm coverage for a period only once all its posted activity is present.
 4. In **Transactions**, correct categories, mark refunds as expenses in the original category, and pair opposite movements across your own accounts. Import both sides of credit-card settlements to classify the movements as a transfer. Card purchases remain expenses. A linked savings contribution counts once toward its goal.
 5. In **Budgets**, select the month and enter allocations. Recommendations use complete prior months and show the underlying periods. Closing a month records a budget revision. Late changes appear as a difference until the month is reopened and closed again. In **Reports**, view and export monthly or annual summaries.
@@ -38,6 +38,8 @@ On Windows, open `%APPDATA%\iCash` to locate application data. Profiles under `p
 ## Optional OpenAI categorization
 
 Open **Settings → OpenAI**, enter a project API key, and choose **Verify and connect**. iCash protects the key with the operating system key store for the active household. Portable backups omit the key, so reconnect OpenAI after restoring a household.
+
+Validating a statement opens category dropdowns for new uncategorized rows. OpenAI suggestions are preselected when connected. You can override them before importing and optionally save rules for patterns with a consistent category.
 
 In **Rules**, choose **Suggest rules with AI** to review patterns from uncategorized imported transactions. Approve the rules and any accompanying expense categories you want. You can also apply the approved rules to matching uncategorized transactions already in the ledger. In **Transactions**, select the pencil to edit in a modal or the sparkle icon to confirm a one-off AI classification.
 

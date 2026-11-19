@@ -3,9 +3,11 @@ import { id } from '../../shared/schema';
 
 export const model = 'gpt-4.1-mini';
 export const openAiKeyInput = z.object({ key: z.string().trim().regex(/^sk-[A-Za-z0-9_-]{12,509}$/, 'Enter a valid OpenAI API key.') }).strict();
+export const categoryChoice = z.union([id, z.literal('suggested'), z.literal('')]);
+export type CategoryChoice = z.infer<typeof categoryChoice>;
 export const applyAiRulesInput = z.object({
   token: id,
-  selected: z.array(z.int().min(0).max(23)).min(1).max(24),
+  selected: z.array(z.object({ index: z.int().min(0).max(23), choice: categoryChoice })).min(1).max(24),
   applyToImported: z.boolean(),
 }).strict();
 

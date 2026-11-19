@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { _electron as electron, expect, test, type Locator, type Page } from '@playwright/test';
@@ -31,17 +31,23 @@ test('imports, corrects, budgets, restarts, and restores a household in Electron
     await page.getByRole('button', { name: 'Save account' }).click();
     await expect(page.getByText('Account saved.')).toBeVisible();
 
-    await app.evaluate(({ dialog }, selected) => {
-      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selected] });
-    }, fixture);
     await nav('Import statements');
-    await page.getByRole('button', { name: 'Choose CSV' }).click();
+    const fileInput = page.locator('i-file-upload input[type=file]');
+    await expect(fileInput).toBeEnabled();
+    const drop = await page.evaluateHandle((contents) => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([contents], 'absa-current.csv', { type: 'text/csv' }));
+      return transfer;
+    }, readFileSync(fixture, 'utf8'));
+    await page.locator('i-file-upload .i-file-upload__drop-zone').dispatchEvent('drop', { dataTransfer: drop });
+    await drop.dispose();
     await page.getByRole('button', { name: 'Validate statement' }).click();
     await expect(page.getByText(/5 ready/)).toBeVisible();
-    await page.getByRole('button', { name: 'Import new rows' }).click();
+    await page.getByRole('dialog', { name: 'Review import categories' })
+      .getByRole('button', { name: 'Import transactions', exact: true }).click();
     await expect(page.getByRole('status').filter({ hasText: /5 added/ })).toBeVisible();
 
-    await page.getByRole('button', { name: 'Choose CSV' }).click();
+    await fileInput.setInputFiles(fixture);
     await page.getByRole('button', { name: 'Validate statement' }).click();
     await expect(page.getByText(/5 duplicates skipped/)).toBeVisible();
     await page.getByRole('button', { name: 'Import new rows' }).click();
@@ -117,14 +123,14 @@ test('reviews OpenAI classifications and imported rules before saving', async ()
     'Date,Description,Amount,Balance',
     '20250501,Synthetic Bakery,-40.00,50.00',
     '20250502,Synthetic Cobbler,-20.00,30.00',
+    '20250503,Synthetic Market,-10.00,20.00',
   ].join('\n'));
   const app = await electron.launch({
     args: ['.', ...(process.env.ICASH_TEST_NO_SANDBOX === '1' ? ['--no-sandbox'] : [])],
     env: { ...process.env, ICASH_TEST_DATA: join(root, 'user-data') },
   });
   try {
-    await app.evaluate(({ dialog }, file) => {
-      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] });
+    await app.evaluate(() => {
       globalThis.fetch = async (url, options) => {
         if (!String(url).startsWith('https://api.openai.com/v1/')) throw new Error('Unexpected network request');
         if (options?.method === 'GET') return Response.json({ id: 'gpt-4.1-mini' });
@@ -138,7 +144,7 @@ test('reviews OpenAI classifications and imported rules before saving', async ()
         return Response.json({ status: 'completed', output: [{ type: 'message',
           content: [{ type: 'output_text', text: JSON.stringify({ suggestions }) }] }] });
       };
-    }, statement);
+    });
     const page = await app.firstWindow();
     const nav = (name: string) => page.locator('i-menu').getByRole('link', { name: new RegExp(name + '$') }).click();
     await page.getByLabel('Household name').fill('Synthetic OpenAI household');
@@ -146,12 +152,6 @@ test('reviews OpenAI classifications and imported rules before saving', async ()
     await page.getByLabel('Account name').fill('Synthetic account');
     await page.getByRole('button', { name: 'Save account' }).click();
     await expect(page.getByText('Account saved.')).toBeVisible();
-    await nav('Import statements');
-    await page.getByRole('button', { name: 'Choose CSV' }).click();
-    await page.getByRole('button', { name: 'Validate statement' }).click();
-    await page.getByRole('button', { name: 'Import new rows' }).click();
-    await expect(page.getByRole('status').filter({ hasText: /2 added/ })).toBeVisible();
-
     await nav('Settings');
     await page.getByRole('tab', { name: /OpenAI/ }).click();
     await page.getByLabel('OpenAI API key').fill('sk-icash-synthetic-key');
@@ -159,7 +159,25 @@ test('reviews OpenAI classifications and imported rules before saving', async ()
     await expect(page.getByText('OpenAI connection verified.')).toBeVisible();
     await expect(page.getByLabel('OpenAI API key')).toHaveValue('');
 
+    await nav('Import statements');
+    const fileInput = page.locator('i-file-upload input[type=file]');
+    await expect(fileInput).toBeEnabled();
+    await fileInput.setInputFiles(statement);
+    await page.getByRole('button', { name: 'Validate statement' }).click();
+    const importReview = page.getByRole('dialog', { name: 'Review import categories' });
+    await expect(importReview).toContainText('3 AI suggestions');
+    const chooseImportCategory = async (row: number, category: string) => {
+      await importReview.getByRole('button', { name: new RegExp('^Category for row ' + row + ':') }).click();
+      await page.getByRole('option', { name: category, exact: true }).click();
+    };
+    await chooseImportCategory(2, 'Leave uncategorized');
+    await chooseImportCategory(3, 'Leave uncategorized');
+    await chooseImportCategory(4, 'Groceries / Supermarkets');
+    await importReview.getByRole('button', { name: 'Import transactions', exact: true }).click();
+    await expect(page.getByRole('status').filter({ hasText: /3 added/ })).toBeVisible();
+
     await nav('Transactions');
+    await expect(page.locator('i-table .i-table-virtual-row').filter({ hasText: 'Synthetic Market' })).toContainText('Supermarkets');
     const ai = page.getByRole('button', { name: 'AI classify Synthetic Bakery' });
     const confirmation = page.getByRole('dialog', { name: 'Confirm AI classification' });
     const bakery = page.locator('i-table .i-table-virtual-row').filter({ has: ai });
@@ -175,9 +193,8 @@ test('reviews OpenAI classifications and imported rules before saving', async ()
     await nav('Rules');
     await page.getByRole('button', { name: 'Suggest rules with AI' }).click();
     const rules = page.getByRole('dialog', { name: 'Review AI rule suggestions' });
-    await expect(rules).toContainText('Create expense category Shoe Repairs');
-    await rules.getByRole('checkbox', { name: /Exactly matches SYNTHETIC COBBLER/ }).click();
-    await rules.getByRole('button', { name: 'Save selected rules' }).click();
+    await expect(rules.getByRole('button', { name: /Category for SYNTHETIC COBBLER:.*Shoe Repairs/ })).toBeVisible();
+    await rules.getByRole('button', { name: 'Save and apply to uncategorized' }).click();
     await expect(page.getByText('Saved 1 rule and categorized 1 imported transaction.')).toBeVisible();
     await nav('Transactions');
     const cobbler = page.locator('i-table .i-table-virtual-row').filter({

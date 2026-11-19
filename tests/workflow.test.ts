@@ -348,7 +348,7 @@ it('proposes AI categories and rules from redacted statements and writes only af
   expect(suggestions.rules[0]).toMatchObject({ match: 'SYNTHETIC COBBLER', operator: 'contains',
     category: { id: saved.categoryId, name: 'Shoe Repairs' } });
   expect(transaction('POS PURCHASE (EFFEC 01052025) SYNTHETIC COBBLER').categoryId).toBeNull();
-  const result = ai.applyRules(suggestions.token, [suggestions.rules[0]!.index], true);
+  const result = ai.applyRules(suggestions.token, [{ index: suggestions.rules[0]!.index, choice: 'suggested' }], true);
   expect(result).toMatchObject({ created: 1, classified: 1 });
   expect(transaction('MANUAL BAKERY').categoryId).toBeNull();
   expect((await ai.suggestRules()).rules).toHaveLength(0);
@@ -359,4 +359,33 @@ it('rejects unsuccessful OpenAI responses without storing the failed key', async
   const ai = new AiCategorization(store, new OpenAiClient(async () => new Response('ignored', { status: 401 })));
   await expect(ai.connect('sk-icash-synthetic-key')).rejects.toThrow(/rejected the API key/);
   expect(ai.status().connected).toBe(false);
+});
+
+it('reviews only new uncategorized statement rows and saves consistent overrides atomically', async () => {
+  const main = account();
+  const groceries = category('Supermarkets');
+  const fuel = category('Fuel');
+  const contents = [
+    'Date,Description,Amount,Balance',
+    '20250501,Checkers groceries,-10.00,90.00',
+    '20250501,Synthetic shop,-20.00,70.00',
+    '20250501,Synthetic shop,-20.00,50.00',
+    '20250501,Synthetic shop,-20.00,50.00',
+  ].join('\n');
+  const selected = imports.selectBytes(db(), active().id, main.id, 'review.csv', Buffer.from(contents));
+  const { token, suggested, delimiter, encoding, header } = selected;
+  const statement = imports.preview(db(), active().id, token, mappingSchema.parse({ ...suggested, delimiter, encoding, header }));
+  const rows = imports.uncategorized(db(), active().id, token, statement.version);
+  expect(rows.map(({ row }) => row)).toEqual([3, 4]);
+  const reviewed = imports.setReview(active().id, token, statement.version, rows, [{
+    index: 0, match: 'SYNTHETIC SHOP', operator: 'equals', direction: 'debit', samples: 2, reason: '',
+    category: { id: fuel.id, label: fuel.name, name: fuel.name, kind: 'expense' },
+  }]);
+  expect(reviewed.suggested).toBe(2);
+  const result = imports.commit(db(), active().id, { token, version: statement.version, acceptRejected: false,
+    review: { changes: [{ row: 3, choice: groceries.id }, { row: 4, choice: groceries.id }], saveRules: true } });
+  expect(result).toMatchObject({ inserted: 3, duplicate: 1, rulesSaved: 1 });
+  const shop = transactions().filter((row) => row.description === 'Synthetic shop');
+  expect(shop.map((row) => row.categoryId)).toEqual([groceries.id, groceries.id]);
+  expect(listRules(db()).find((rule) => rule.conditions.text === 'SYNTHETIC SHOP')?.categoryId).toBe(groceries.id);
 });

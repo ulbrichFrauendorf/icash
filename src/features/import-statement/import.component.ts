@@ -1,17 +1,20 @@
 import { rowChoices, retainChoice } from '../../shared/ui/choices';
-import { IButton, ICard, ICheckbox, IInputText, IMessage, ISelect, ITable, type GridData, NoContentComponent } from 'invensys-ng';
+import { IButton, ICard, ICheckbox, IDialog, IFileUpload, type FileUploadOptions, IInputText, IMessage, ISelect, ITable, type GridData, NoContentComponent } from 'invensys-ng';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { Account } from '../accounts/contract';
 import { formatZar, ZarPipe } from '../../shared/ui/pipes';
 import { Ui } from '../../shared/ui/state';
-import type { AuditRow, Batch, FilePreview, ImportPreview, Mapping } from './contract';
+import { statementLimit, type AuditRow, type Batch, type FilePreview, type ImportPreview, type ImportReviewPage, type ImportReviewRow, type Mapping } from './contract';
+import type { Category } from '../categories/contract';
+import type { CategoryChoice } from '../openai/contract';
+import { reviewCategoryChoices } from '../../shared/ui/category-choices';
 
 type Column = 'date' | 'description' | 'amount' | 'debit' | 'credit' | 'balance' | 'reference';
 
 @Component({
   selector: 'icash-import',
-  imports: [FormsModule, ZarPipe, IButton, IInputText, ISelect, ICheckbox, ICard, IMessage, ITable, NoContentComponent],
+  imports: [FormsModule, ZarPipe, IButton, IInputText, ISelect, ICheckbox, IDialog, IFileUpload, ICard, IMessage, ITable, NoContentComponent],
   templateUrl: './import.component.html',
 })
 export class ImportPage {
@@ -26,7 +29,13 @@ export class ImportPage {
   auditPage = 0;
   file: FilePreview | null = null;
   preview: ImportPreview | null = null;
-  acceptRejected = false;
+  validating = false;
+  files: File[] = [];
+  readonly uploadOptions: FileUploadOptions = { multiple: false, maxFiles: 1, fileTypes: ['.csv', '.txt'],
+    maxFileSize: statementLimit, maxTotalSize: statementLimit };
+  review: ImportReviewPage | null = null;
+  private categories: Category[] = [];
+  private choices = new Map<number, CategoryChoice>();
   delimiter: Mapping['delimiter'] = ',';
   encoding: Mapping['encoding'] = 'utf-8';
   header = 1;
@@ -72,12 +81,17 @@ export class ImportPage {
   }));
   fields(): Column[] { return ['date', 'description', ...(this.layout === 'signed' ? ['amount'] as const : ['debit', 'credit'] as const), 'balance', 'reference']; }
   headers() { return this.file?.headers ?? []; }
-  invalidate() { this.preview = null; this.acceptRejected = false; }
-  reset() { this.file = null; this.invalidate(); }
-  choose() {
+  invalidate() { this.preview = null; this.review = null; this.choices.clear(); }
+  reset() { this.files = []; this.file = null; this.invalidate(); }
+  selectFiles(files: File[]) {
+    const selected = files[0];
+    if (!selected) return this.cancel();
+    if (!this.account) return;
+    this.reset();
+    this.files = files;
     return this.ui.run(async () => {
-      const file = await this.ui.api.selectImport({ id: this.account });
-      if (!file) return;
+      const file = await this.ui.api.selectImport({ id: this.account, name: selected.name,
+        bytes: new Uint8Array(await selected.arrayBuffer()) });
       this.file = file;
       this.invalidate();
       this.delimiter = file.delimiter;
@@ -124,22 +138,45 @@ export class ImportPage {
       }
       const { date, description, balance, reference, amount, debit, credit } = this.columns;
       if (date === undefined || description === undefined) throw new Error('Map the posting date and description first.');
-      this.preview = await this.ui.api.previewImport({ token: this.file.token, mapping: {
-        date, description, balance, reference, ...(this.layout === 'signed' ? { amount } : { debit, credit }),
-        delimiter: this.delimiter, encoding: this.encoding, header: this.header, dateFormat: this.dateFormat,
-        decimal: this.decimal, invert: this.invert,
-      } });
+      this.invalidate();
+      this.validating = true;
+      try {
+        this.preview = await this.ui.api.previewImport({ token: this.file.token, mapping: {
+          date, description, balance, reference, ...(this.layout === 'signed' ? { amount } : { debit, credit }),
+          delimiter: this.delimiter, encoding: this.encoding, header: this.header, dateFormat: this.dateFormat,
+          decimal: this.decimal, invert: this.invert,
+        } });
+        if (this.preview.review) {
+          this.categories = await this.ui.api.categories();
+          this.review = this.preview.review;
+        }
+      } finally { this.validating = false; }
+    });
+  }
+  categoryOptions(row: ImportReviewRow) {
+    return reviewCategoryChoices(this.categories, row.treatment, 'Leave uncategorized', row.suggestion);
+  }
+  categorySelection(row: ImportReviewRow) {
+    return this.choices.get(row.row) ?? (row.suggestion ? 'suggested' : '');
+  }
+  chooseCategory(row: number, choice: CategoryChoice) { this.choices.set(row, choice); }
+  openReview() { this.review = this.preview?.review ?? null; }
+  showReviewPage(page: number) {
+    return this.ui.run(async () => {
+      if (!this.file || !this.preview) return;
+      this.review = await this.ui.api.importReviewPage({ token: this.file.token, version: this.preview.version, page });
     });
   }
   errors() { return this.ui.run(async () => { if (this.file) await this.ui.api.exportErrors({ id: this.file.token }); }); }
-  commit() {
+  commit(saveRules = false) {
     return this.ui.run(async () => {
       if (!this.file || !this.preview) return;
       const result = await this.ui.api.commitImport({ token: this.file.token, version: this.preview.version,
-        acceptRejected: this.acceptRejected });
+        acceptRejected: this.preview.counts.rejected > 0,
+        review: this.preview.review ? { saveRules, changes: [...this.choices].map(([row, choice]) => ({ row, choice })) } : undefined });
       this.reset();
       this.batches.set(await this.ui.api.batches());
-      this.ui.info.set(`Import complete. ${result.inserted} added, ${result.duplicate} duplicates, ${result.rejected} rejected.`);
+      this.ui.info.set(`Import complete. ${result.inserted} added, ${result.duplicate} duplicates, ${result.rejected} rejected.` + (result.rulesSaved ? ` Saved ${result.rulesSaved} rules.` : ''));
     });
   }
   showAudit(id: string, page = 0) {

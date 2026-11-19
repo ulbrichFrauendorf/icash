@@ -1,9 +1,10 @@
+import { reviewCategoryChoices } from '../../shared/ui/category-choices';
 import { rowChoices, retainChoice } from '../../shared/ui/choices';
 import { IButton, ICard, ICheckbox, IDialog, IMessage, IInputText, ISelect, NoContentComponent } from 'invensys-ng';
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Ui, money, moneyText } from '../../shared/ui/state';
-import type { AiRules } from '../openai/contract';
+import type { AiRule, AiRules, CategoryChoice } from '../openai/contract';
 import type { Account } from '../accounts/contract';
 import type { Category } from '../categories/contract';
 import type { Rule, RulePreview } from './contract';
@@ -28,18 +29,18 @@ export class RulesPage {
   readonly rules = signal<Rule[]>([]);
   readonly preview = signal<RulePreview | null>(null);
   readonly aiDraft = signal<AiRules | null>(null);
-  readonly selectedRules = signal<Set<number>>(new Set());
-  applyToImported = true;
+  readonly selectedRules = signal<Map<number, CategoryChoice>>(new Map());
   draft = blank();
   constructor() {
     void this.ui.load(async () => {
       const [rules, categories, accounts] = await Promise.all([this.ui.api.rules(), this.ui.api.categories(), this.ui.api.accounts()]);
       this.rules.set(rules);
-      this.categories.set(categories.filter((item) => item.leaf && !item.archived));
+      this.categories.set(categories);
       this.accounts.set(accounts);
     });
   }
   readonly categoryLabel = (category: Category) => this.categoryName(category.id);
+  editableCategories() { return this.categories().filter((item) => item.leaf && !item.archived); }
   categoryName(id: string | null) {
     return this.categories().find((item) => item.id === id)?.name ?? 'Uncategorized';
   }
@@ -74,26 +75,25 @@ export class RulesPage {
         this.ui.info.set('No new rules could be suggested for uncategorized transactions.');
         return;
       }
-      this.applyToImported = true;
-      this.selectedRules.set(new Set());
+      this.selectedRules.set(new Map(result.rules.map((rule) => [rule.index, 'suggested'])));
       this.aiDraft.set(result);
     });
   }
-  selectRule(index: number, checked: boolean) {
-    this.selectedRules.update((selected) => {
-      const next = new Set(selected);
-      if (checked) next.add(index);
-      else next.delete(index);
-      return next;
-    });
+  categoryOptions(rule: AiRule) {
+    return reviewCategoryChoices(this.categories(), rule.category.kind, 'Skip rule', rule.category);
   }
-  saveAiRules(draft: AiRules) {
+  selectRule(index: number, choice: CategoryChoice) {
+    this.selectedRules.update((selected) => new Map(selected).set(index, choice));
+  }
+  hasSelectedRules() { return [...this.selectedRules().values()].some(Boolean); }
+  saveAiRules(draft: AiRules, applyToImported: boolean) {
     return this.ui.run(async () => {
       const result = await this.ui.api.applyAiRules({
-        token: draft.token, selected: [...this.selectedRules()], applyToImported: this.applyToImported,
+        token: draft.token, applyToImported,
+        selected: [...this.selectedRules()].flatMap(([index, choice]) => choice ? [{ index, choice }] : []),
       });
       this.rules.set(result.rules);
-      this.categories.set((await this.ui.api.categories()).filter((item) => item.leaf && !item.archived));
+      this.categories.set(await this.ui.api.categories());
       this.preview.set(null);
       this.aiDraft.set(null);
       const rules = result.created === 1 ? 'rule' : 'rules';

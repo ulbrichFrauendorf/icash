@@ -8,10 +8,13 @@ import type { Db } from '../../platform/main/database';
 import { cents, normalizeText } from '../../shared/finance';
 import { UserError } from '../../shared/schema';
 import { categorizer } from '../categorization/main';
-import { mapping as mappingSchema, type AuditRow, type Batch, type Candidate, type FilePreview, type ImportPreview, type Mapping, type RowPreview, type commitInput, type decodeInput } from './contract';
+import { mapping as mappingSchema, type AuditRow, type Batch, type Candidate, type FilePreview, type ImportPreview, type ImportReviewRow, type ImportReviewPage, type ImportResult, type Mapping, type RowPreview, type commitInput, type decodeInput } from './contract';
+import type { AiRule, CategoryChoice } from '../openai/contract';
+import { patternKey, resolveCategoryChoice, rulePattern, saveApprovedRules } from '../openai/main';
+import { statementLimit } from './contract';
 import { matchKey, normalizeRow, suggestFormats, suggestMapping } from './domain';
 
-const fileLimit = 12 * 1024 * 1024;
+const reviewSize = 30;
 const rowLimit = 60000;
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 
@@ -19,7 +22,7 @@ type ParsedRow = { original: string[]; row: number };
 type PreparedRow = RowPreview & { matchedId?: string; matchedRow?: number };
 type Session = {
   profileId: string; accountId: string; fileName: string; hash: string; bytes: Buffer;
-  preview?: { version: string; mapping: Mapping; rows: PreparedRow[]; ledgerVersion: number };
+  preview?: { version: string; mapping: Mapping; rows: PreparedRow[]; ledgerVersion: number; review?: { rows: Map<number, ImportReviewRow>; suggested: number; notice?: string } };
 };
 type Existing = Candidate & { id: string };
 type DuplicateMatch = { balance: number | null; matchedId?: string; matchedRow?: number };
@@ -68,7 +71,7 @@ export class Imports {
     let bytes: Buffer;
     try {
       const stats = await handle.stat();
-      if (!stats.isFile() || stats.size === 0 || stats.size > fileLimit) {
+      if (!stats.isFile() || stats.size === 0 || stats.size > statementLimit) {
         throw new UserError('Choose a CSV statement between 1 byte and 12 MiB.');
       }
       bytes = Buffer.alloc(stats.size + 1);
@@ -77,7 +80,16 @@ export class Imports {
       bytes = bytes.subarray(0, read.bytesRead);
     } finally { await handle.close(); }
     if (!db.open) throw new UserError('The active profile changed. Select the statement again.');
-    const session = { profileId, accountId, fileName: basename(file), hash: hash(bytes), bytes };
+    return this.selectBytes(db, profileId, accountId, basename(file), bytes);
+  }
+
+  selectBytes(db: Db, profileId: string, accountId: string, fileName: string, data: Uint8Array): FilePreview {
+    if (!db.prepare('SELECT id FROM accounts WHERE id=? AND archived=0').get(accountId)) {
+      throw new UserError('Choose an active account.');
+    }
+    if (!data.byteLength || data.byteLength > statementLimit) throw new UserError('Choose a statement up to 12 MiB.');
+    const bytes = Buffer.from(data);
+    const session = { profileId, accountId, fileName, hash: hash(bytes), bytes };
     this.session = session;
     const token = this.token = randomUUID();
     const saved = this.saved(db, accountId);
@@ -227,6 +239,48 @@ export class Imports {
     };
   }
 
+  private currentPreview(profileId: string, token: string, version: string) {
+    const session = this.get(profileId, token);
+    const preview = session.preview;
+    if (!preview || preview.version !== version || preview.ledgerVersion !== this.ledgerVersion) {
+      throw new UserError('This import preview is stale. Validate it again.');
+    }
+    return { session, preview };
+  }
+
+  uncategorized(db: Db, profileId: string, token: string, version: string): ImportReviewRow[] {
+    const { session, preview } = this.currentPreview(profileId, token, version);
+    const classify = categorizer(db);
+    return preview.rows.flatMap(({ state, candidate, row }) => {
+      if (state !== 'accepted' || !candidate) return [];
+      const { categoryId, treatment } = classify({ ...candidate, accountId: session.accountId, merchant: '' });
+      if (categoryId || treatment === 'transfer') return [];
+      return [{ row, description: candidate.description, date: candidate.date, amount: candidate.amount, treatment }];
+    });
+  }
+
+  setReview(profileId: string, token: string, version: string, rows: ImportReviewRow[], rules: AiRule[], notice?: string) {
+    const { preview } = this.currentPreview(profileId, token, version);
+    const byPattern = new Map(rules.map((rule) => [patternKey(rule), rule.category]));
+    let suggested = 0;
+    const reviewed = new Map(rows.map((row) => {
+      const pattern = rulePattern(row);
+      const suggestion = pattern ? byPattern.get(patternKey(pattern)) : undefined;
+      if (suggestion) suggested++;
+      return [row.row, { ...row, suggestion }];
+    }));
+    preview.review = { rows: reviewed, suggested, notice };
+    return this.reviewPage(profileId, token, version, 0);
+  }
+
+  reviewPage(profileId: string, token: string, version: string, page: number): ImportReviewPage {
+    const { preview } = this.currentPreview(profileId, token, version);
+    if (!preview.review) throw new UserError('Validate the statement to review categories.');
+    const { rows, suggested, notice } = preview.review;
+    return { rows: [...rows.values()].slice(page * reviewSize, (page + 1) * reviewSize),
+      total: rows.size, suggested, page, size: reviewSize, notice };
+  }
+
   errors(profileId: string, token: string) {
     const preview = this.get(profileId, token).preview;
     if (!preview) throw new UserError('Validate the statement first.');
@@ -234,12 +288,8 @@ export class Imports {
   }
 
   commit(db: Db, profileId: string, input: z.infer<typeof commitInput>) {
-    const session = this.get(profileId, input.token);
-    const preview = session.preview;
-    if (!preview || input.version !== preview.version || preview.ledgerVersion !== this.ledgerVersion) {
-      throw new UserError('This import preview is stale. Validate it again.');
-    }
-    const result = db.transaction(() => {
+    const { session, preview } = this.currentPreview(profileId, input.token, input.version);
+    const result = db.transaction((): ImportResult => {
       if (!db.prepare('SELECT id FROM accounts WHERE id=? AND archived=0').get(session.accountId)) {
         throw new UserError('The selected account is no longer active.');
       }
@@ -258,6 +308,13 @@ export class Imports {
       db.prepare('INSERT INTO import_batches VALUES(?,?,?,?,?,?,?)').run(counts.id, session.accountId,
         session.fileName, session.hash, mappingHash, new Date().toISOString(), Number(!rows.some((row) => row.state === 'rejected')));
       const classify = categorizer(db);
+      const reviewed = preview.review?.rows;
+      const changes = new Map<number, CategoryChoice>(input.review?.changes.map(({ row, choice }) => [row, choice]));
+      for (const row of changes.keys()) {
+        if (!reviewed?.has(row)) throw new UserError('Only uncategorized transactions can be updated during import.');
+      }
+      const resolved = new Map<string, string | null>();
+      const ruleApprovals = new Map<string, { pattern: NonNullable<ReturnType<typeof rulePattern>>; categories: Set<string | null> }>();
       const insert = db.prepare(`INSERT INTO transactions(id,account_id,batch_id,date,amount,description,normalized,balance,reference,
           treatment,category_id,classification,rule_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`);
       const audit = db.prepare('INSERT INTO import_rows VALUES(?,?,?,?,?,?)');
@@ -268,10 +325,28 @@ export class Imports {
         if (state === 'accepted' && row.candidate) {
           const candidate = row.candidate;
           const classification = classify({ ...candidate, accountId: session.accountId, merchant: '' });
+          const reviewedRow = input.review && reviewed?.get(row.row);
+          let selected = classification.categoryId;
+          if (reviewedRow) {
+            if (classification.categoryId || classification.treatment !== reviewedRow.treatment) {
+              throw new UserError('Categorization rules changed after validation. Validate the statement again.');
+            }
+            const choice = changes.get(row.row) ?? (reviewedRow.suggestion ? 'suggested' : '');
+            const key = JSON.stringify([choice, reviewedRow.treatment, choice === 'suggested' ? reviewedRow.suggestion : undefined]);
+            if (!resolved.has(key)) resolved.set(key, resolveCategoryChoice(db, choice, reviewedRow.treatment, reviewedRow.suggestion));
+            selected = resolved.get(key) ?? null;
+            const pattern = input.review?.saveRules ? rulePattern(reviewedRow) : null;
+            if (pattern) {
+              const key = patternKey(pattern);
+              const approval = ruleApprovals.get(key) ?? { pattern, categories: new Set<string | null>() };
+              approval.categories.add(selected);
+              ruleApprovals.set(key, approval);
+            }
+          }
           transactionId = randomUUID();
           insert.run(transactionId, session.accountId, counts.id, candidate.date, candidate.amount, candidate.description,
             normalizeText(candidate.description), candidate.balance, candidate.reference, classification.treatment,
-            classification.categoryId, classification.classification, classification.ruleId);
+            selected, reviewedRow && selected ? 'manual' : classification.classification, classification.ruleId);
           insertedByRow.set(row.row, transactionId);
           counts.inserted++;
         }
@@ -279,8 +354,13 @@ export class Imports {
         if (state === 'duplicate') counts.duplicate++;
         audit.run(counts.id, row.row, state, row.message, JSON.stringify(row.original), transactionId);
       }
+      const approvals = [...ruleApprovals.values()].flatMap(({ pattern, categories }) => {
+        const [id] = categories;
+        return categories.size === 1 && id ? [{ pattern, categoryId: id }] : [];
+      });
+      const rulesSaved = approvals.length ? saveApprovedRules(db, approvals).size : 0;
       db.prepare('UPDATE accounts SET mapping=? WHERE id=?').run(JSON.stringify(preview.mapping), session.accountId);
-      return counts;
+      return rulesSaved ? { ...counts, rulesSaved } : counts;
     }).immediate();
     this.ledgerVersion++;
     this.clear();
