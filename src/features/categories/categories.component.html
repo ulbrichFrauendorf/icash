@@ -108,70 +108,45 @@
         </div>
       </form>
   </i-dialog>
+  @if (proposalDraft(); as proposal) {
+    <i-dialog header="Edit proposed category" width="32rem" [visible]="true" [closable]="!ui.busy()"
+      (visibleChange)="!$event && proposalDraft.set(null)">
+      <form class="stack" (ngSubmit)="moderate(proposal, 'edit')">
+        <i-input-text [id]="'statement-category-name'" label="Category name" name="proposalName" [(ngModel)]="proposal.name" maxlength="80" required [fluid]="true" />
+        <i-input-text [id]="'statement-category-group'" label="Category group" name="proposalGroup" [(ngModel)]="proposal.group" maxlength="80" required [fluid]="true" />
+        <div class="actions">
+          <i-button type="submit" [disabled]="ui.busy() || !proposal.name.trim() || !proposal.group.trim()">Save proposal</i-button>
+          <i-button (clicked)="proposalDraft.set(null)" severity="secondary" [outlined]="true">Cancel</i-button>
+        </div>
+      </form>
+    </i-dialog>
+  }
   <div class="page-main">
-    <i-table [grid]="grid()" dataKey="id" size="small"
-      [sortable]="true" [filterable]="true" [globalFilter]="true" [scrollable]="true"
-      height="min(52dvh, 30rem)" emptyMessage="Create a category or restore the household defaults.">
-      <i-button header icon="pi pi-plus" size="small" severity="info" ariaLabel="New category" (clicked)="reset()" />
-    </i-table>
+    @if (showModeration() && moderation(); as current) {
+      <i-table [grid]="moderationGrid()" dataKey="id" size="small" [sortable]="true"
+        [globalFilter]="true" [virtualScroll]="true" [height]="tableHeight">
+        <div header class="actions">
+          <strong>Review categories for {{ current.fileName }}</strong>
+          <i-button size="small" severity="secondary" [text]="true" (clicked)="showModeration.set(false)">Saved categories</i-button>
+          <i-button size="small" [disabled]="!!pending() || ui.busy()" (clicked)="ui.go('Import')">Continue to rule assignments</i-button>
+        </div>
+      </i-table>
+    } @else {
+      <i-table [grid]="grid()" dataKey="id" size="small"
+        [sortable]="true" [filterable]="true" [globalFilter]="true" [scrollable]="true"
+        [height]="tableHeight" emptyMessage="Create a category or restore the household defaults.">
+        <div header class="actions">
+          <i-button icon="pi pi-plus" size="small" severity="info" ariaLabel="New category" (clicked)="reset()" />
+          @if (moderation()) {
+            <i-button size="small" severity="secondary" [text]="true" (clicked)="showModeration.set(true)">Statement category proposals</i-button>
+          }
+        </div>
+      </i-table>
+    }
+  </div>
+  <section iPageRightSidebar label="Templates" [(visible)]="templatesVisible">
     <i-card class="surface">
       <div class="stack">
-        <h2>Merge categories</h2>
-        @let choices3 =
-          [
-            { value: '', label: 'Select source' },
-            ...rowChoices(leaves(), 'id', categoryLabel),
-          ];
-        <i-select
-          label="Source category"
-          [options]="choices3"
-          optionLabel="label"
-          [fluid]="true"
-          [ngModel]="selected(choices3, from)"
-          (ngModelChange)="from = $event.value; usage.set(null)"
-        />
-        @let choices4 =
-          [
-            { value: '', label: 'Select destination' },
-            ...rowChoices(leaves(), 'id', categoryLabel),
-          ];
-        <i-select
-          label="Destination category"
-          [options]="choices4"
-          optionLabel="label"
-          [fluid]="true"
-          [ngModel]="selected(choices4, to)"
-          (ngModelChange)="to = $event.value; usage.set(null)"
-        />
-        <i-button
-          [disabled]="!from || !to || from === to || ui.busy()"
-          (clicked)="previewMerge()"
-          severity="secondary"
-          [outlined]="true"
-        >
-          Preview merge
-        </i-button>
-        @if (usage(); as counts) {
-          <p>
-            {{ counts['transactions'] }} transactions,
-            {{ counts['splits'] }} split lines, {{ counts['rules'] }} rules,
-            and
-            {{ (counts['allocations'] || 0) + (counts['defaults'] || 0) }}
-            budget entries will move. The source is archived.
-          </p>
-          <i-button
-            [disabled]="ui.busy()"
-            (clicked)="merge()"
-            severity="danger"
-          >
-            Confirm merge
-          </i-button>
-        }
-      </div>
-    </i-card>
-    <i-card class="surface">
-      <div class="stack">
-        <h2>Templates</h2>
         <div class="actions">
           <i-button
             [disabled]="ui.busy()"
@@ -216,5 +191,5 @@
         }
       </div>
     </i-card>
-  </div>
+  </section>
 </i-page-layout>

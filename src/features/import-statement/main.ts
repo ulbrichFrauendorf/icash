@@ -7,8 +7,10 @@ import type { z } from 'zod';
 import type { Db } from '../../platform/main/database';
 import { cents, normalizeText } from '../../shared/finance';
 import { UserError } from '../../shared/schema';
+import { categories } from '../categories/main';
+import { defaultGroup } from '../categories/template';
 import { categorizer } from '../categorization/main';
-import { mapping as mappingSchema, type AuditRow, type Batch, type Candidate, type FilePreview, type ImportPreview, type ImportReviewRow, type ImportReview, type ImportResult, type Mapping, type RowPreview, type commitInput, type decodeInput } from './contract';
+import { mapping as mappingSchema, type AuditRow, type Batch, type Candidate, type FilePreview, type ImportPreview, type ImportReviewRow, type CategoryProposal, type ImportModeration, type ImportRule, type ResumableImport, type ImportResult, type Mapping, type RowPreview, type commitInput, type decodeInput, type moderateCategoryInput, type importRulesInput } from './contract';
 import type { CategoryChoice } from '../openai/contract';
 import { patternKey, resolveCategoryChoice, reviewSample, rulePattern, saveApprovedRules, type ReviewSuggestion } from '../openai/main';
 import { statementLimit } from './contract';
@@ -20,11 +22,18 @@ const hash = (value: string | Buffer) => createHash('sha256').update(value).dige
 type ParsedRow = { original: string[]; row: number };
 type PreparedRow = RowPreview & { matchedId?: string; matchedRow?: number };
 type ReviewPattern = NonNullable<ReturnType<typeof rulePattern>>;
+type ModeratedCategory = CategoryProposal & { categoryId?: string };
+type Review = {
+  rows: Map<number, ImportReviewRow>;
+  patterns: Map<number, ReviewPattern>;
+  proposals: Map<string, ModeratedCategory>;
+  rowProposals: Map<number, string>;
+  notice?: string;
+};
 type Session = {
   profileId: string; accountId: string; fileName: string; hash: string; bytes: Buffer;
-  preview?: { version: string; mapping: Mapping; rows: PreparedRow[]; ledgerVersion: number; review?: {
-    rows: Map<number, ImportReviewRow>; patterns: Map<number, ReviewPattern>;
-  } };
+  file?: FilePreview;
+  preview?: { summary: ImportPreview; mapping: Mapping; rows: PreparedRow[]; ledgerVersion: number; review?: Review };
 };
 type Existing = Candidate & { id: string };
 type DuplicateMatch = { balance: number | null; matchedId?: string; matchedRow?: number };
@@ -134,7 +143,7 @@ export class Imports {
     const headerKey = headers.map(normalizeText).join('\u001f');
     const sample = records.slice(input.header).map(({ original }) => original)
       .filter((row) => row.map(normalizeText).join('\u001f') !== headerKey);
-    return {
+    return session.file = {
       ...input, fileName: session.fileName, rows: shown, headers,
       suggested: { ...columns, ...suggestFormats(sample, columns) },
       saved: this.saved(db, session.accountId),
@@ -212,7 +221,6 @@ export class Imports {
     const session = this.get(profileId, token);
     const rows = this.prepare(db, session, mapping);
     const version = randomUUID();
-    session.preview = { version, mapping, rows, ledgerVersion: this.ledgerVersion };
     const counts = { accepted: 0, duplicate: 0, rejected: 0, skipped: 0 };
     let debits = 0;
     let credits = 0;
@@ -235,16 +243,18 @@ export class Imports {
     const reconciliation = comparable.length && !forward && !reverse ? 'Running balances do not reconcile. Verify mapping and statement continuity.' : null;
     const present = ({ row, original, candidate, state, message }: PreparedRow): RowPreview =>
       ({ row, original, candidate, state, message });
-    return {
+    const summary = {
       version, counts, debits, credits, net: cents(debits + credits), reconciliation,
       rows: rows.filter((row) => row.state !== 'skipped').slice(0, 60).map(present),
     };
+    session.preview = { summary, mapping, rows, ledgerVersion: this.ledgerVersion };
+    return summary;
   }
 
   private currentPreview(profileId: string, token: string, version: string) {
     const session = this.get(profileId, token);
     const preview = session.preview;
-    if (!preview || preview.version !== version || preview.ledgerVersion !== this.ledgerVersion) {
+    if (!preview || preview.summary.version !== version || preview.ledgerVersion !== this.ledgerVersion) {
       throw new UserError('This import preview is stale. Validate it again.');
     }
     return { session, preview };
@@ -261,20 +271,140 @@ export class Imports {
     });
   }
 
-  setReview(profileId: string, token: string, version: string, rows: ImportReviewRow[], suggestions: ReadonlyMap<string, ReviewSuggestion>, notice?: string): ImportReview {
+  setReview(db: Db, profileId: string, token: string, version: string, rows: ImportReviewRow[],
+    suggestions: ReadonlyMap<string, ReviewSuggestion>, notice?: string): ImportPreview {
     const { preview } = this.currentPreview(profileId, token, version);
-    const patterns = new Map<number, ReviewPattern>();
-    let suggested = 0;
-    const reviewed = new Map(rows.map((row) => {
+    const review: Review = { rows: new Map(), patterns: new Map(), proposals: new Map(), rowProposals: new Map(), notice };
+    const byName = new Map<string, ModeratedCategory>();
+    for (const row of rows) {
       const sample = reviewSample(row);
       const suggestion = suggestions.get(sample.key);
       const pattern = suggestion ? suggestion.rule : sample.pattern;
-      if (pattern) patterns.set(row.row, pattern);
-      if (suggestion) suggested++;
-      return [row.row, { ...row, suggestion: suggestion?.category }];
+      if (pattern) review.patterns.set(row.row, pattern);
+      review.rows.set(row.row, { ...row, suggestion: suggestion?.category });
+      if (!suggestion || suggestion.category.id) continue;
+      const { name, group = defaultGroup(row.treatment, name) } = suggestion.category;
+      const key = JSON.stringify([normalizeText(group), normalizeText(name)]);
+      let proposal = byName.get(key);
+      if (!proposal) {
+        proposal = { id: randomUUID(), name, group, rows: 0, status: 'pending' };
+        byName.set(key, proposal);
+        review.proposals.set(proposal.id, proposal);
+      }
+      proposal.rows++;
+      review.rowProposals.set(row.row, proposal.id);
+    }
+    preview.review = review;
+    return this.reviewPreview(db, preview);
+  }
+
+  moderation(profileId: string): ImportModeration | null {
+    const { session, token } = this;
+    const preview = session?.preview;
+    if (!token || session?.profileId !== profileId || !preview?.review?.proposals.size) return null;
+    return { token, version: preview.summary.version, fileName: session.fileName,
+      proposals: [...preview.review.proposals.values()].map(({ id, name, group, rows, status }) => ({ id, name, group, rows, status })) };
+  }
+
+  moderateCategory(db: Db, profileId: string, input: z.infer<typeof moderateCategoryInput>) {
+    const { preview } = this.currentPreview(profileId, input.token, input.version);
+    const proposal = preview.review?.proposals.get(input.proposalId);
+    if (!proposal || proposal.status !== 'pending') throw new UserError('This category has already been reviewed.');
+    if (input.action === 'edit') {
+      if (!input.edit) throw new UserError('Enter a category name and group.');
+      if (normalizeText(input.edit.name) === normalizeText(input.edit.group)) throw new UserError('Use different names for the category and group.');
+      Object.assign(proposal, input.edit);
+    } else if (input.action === 'accept') {
+      const { name, group } = proposal;
+      const id = db.transaction(() => resolveCategoryChoice(db, 'suggested', 'expense',
+        { id: null, name, group, kind: 'expense', label: group + ' / ' + name })).immediate();
+      if (!id) throw new UserError('Could not save this category.');
+      proposal.categoryId = id;
+      proposal.status = 'accepted';
+    } else {
+      proposal.status = 'deleted';
+    }
+    return this.moderation(profileId);
+  }
+
+  resume(db: Db, profileId: string): ResumableImport | null {
+    const session = this.session;
+    if (session?.profileId !== profileId || !session.file || !session.preview) return null;
+    return { accountId: session.accountId, file: session.file, mapping: session.preview.mapping,
+      preview: this.reviewPreview(db, session.preview) };
+  }
+
+  private reviewPreview(db: Db, preview: NonNullable<Session['preview']>): ImportPreview {
+    const review = preview.review;
+    if (!review) return preview.summary;
+    const pendingCategories = [...review.proposals.values()].filter((proposal) => proposal.status === 'pending').length;
+    if (pendingCategories) return { ...preview.summary, pendingCategories };
+    const rows = this.reviewRows(db, review);
+    return { ...preview.summary, review: {
+      rows: [...rows.values()], suggested: [...rows.values()].filter((row) => row.suggestion).length, notice: review.notice,
+    } };
+  }
+
+  private reviewRows(db: Db, review?: Review) {
+    const rows = new Map<number, ImportReviewRow>();
+    if (!review) return rows;
+    if ([...review.proposals.values()].some((proposal) => proposal.status === 'pending')) {
+      throw new UserError('Finish reviewing the proposed categories on the Categories page.');
+    }
+    const list = new Map(categories(db).map((category) => [category.id, category]));
+    for (const [number, row] of review.rows) {
+      const proposalId = review.rowProposals.get(number);
+      const categoryId = proposalId ? review.proposals.get(proposalId)?.categoryId : row.suggestion?.id;
+      const category = categoryId ? list.get(categoryId) : undefined;
+      const parent = category?.parentId ? list.get(category.parentId) : undefined;
+      const suggestion = category && parent && !category.archived && !parent.archived && category.kind === row.treatment
+        ? { id: category.id, name: category.name, kind: row.treatment, label: parent.name + ' / ' + category.name }
+        : undefined;
+      rows.set(number, { ...row, suggestion });
+    }
+    return rows;
+  }
+
+  private selections(db: Db, rows: Map<number, ImportReviewRow>, choices: z.infer<typeof importRulesInput>['changes']) {
+    const changes = new Map(choices.map(({ row, choice }) => [row, choice]));
+    for (const row of changes.keys()) {
+      if (!rows.has(row)) throw new UserError('Only uncategorized transactions can be updated during import.');
+    }
+    const resolved = new Map<string, string | null>();
+    return new Map([...rows].map(([number, row]) => {
+      const choice: CategoryChoice = changes.get(number) ?? row.suggestion?.id ?? '';
+      if (choice === 'suggested') throw new UserError('Choose an approved category.');
+      const key = JSON.stringify([choice, row.treatment]);
+      if (!resolved.has(key)) resolved.set(key, resolveCategoryChoice(db, choice, row.treatment));
+      return [number, resolved.get(key) ?? null];
     }));
-    preview.review = { rows: reviewed, patterns };
-    return { rows: [...reviewed.values()], suggested, notice };
+  }
+
+  private ruleAssignments(review: Review | undefined, selected: Map<number, string | null>) {
+    const groups = new Map<string, { pattern: ReviewPattern; categories: Set<string | null>; rows: number[] }>();
+    for (const [row, pattern] of review?.patterns ?? []) {
+      const key = patternKey(pattern);
+      const group = groups.get(key) ?? { pattern, categories: new Set<string | null>(), rows: [] };
+      group.categories.add(selected.get(row) ?? null);
+      group.rows.push(row);
+      groups.set(key, group);
+    }
+    return [...groups].flatMap(([key, { pattern, categories, rows }]) => {
+      const [categoryId] = categories;
+      return categories.size === 1 && categoryId ? [{ key, pattern, categoryId, rows }] : [];
+    });
+  }
+
+  reviewRules(db: Db, profileId: string, input: z.infer<typeof importRulesInput>): ImportRule[] {
+    const { preview } = this.currentPreview(profileId, input.token, input.version);
+    const selected = this.selections(db, this.reviewRows(db, preview.review), input.changes);
+    const list = new Map(categories(db).map((category) => [category.id, category]));
+    return this.ruleAssignments(preview.review, selected).map(({ key, pattern, categoryId, rows }) => {
+      const category = list.get(categoryId)!;
+      const parent = list.get(category.parentId!)!;
+      return { key, name: pattern.name, match: pattern.match, direction: pattern.direction,
+        category: parent.name + ' / ' + category.name, categoryId, rows, kind: category.kind as ImportReviewRow['treatment'] };
+    });
   }
 
   errors(profileId: string, token: string) {
@@ -285,6 +415,7 @@ export class Imports {
 
   commit(db: Db, profileId: string, input: z.infer<typeof commitInput>) {
     const { session, preview } = this.currentPreview(profileId, input.token, input.version);
+    const reviewed = this.reviewRows(db, preview.review);
     const result = db.transaction((): ImportResult => {
       if (!db.prepare('SELECT id FROM accounts WHERE id=? AND archived=0').get(session.accountId)) {
         throw new UserError('The selected account is no longer active.');
@@ -304,13 +435,11 @@ export class Imports {
       db.prepare('INSERT INTO import_batches VALUES(?,?,?,?,?,?,?)').run(counts.id, session.accountId,
         session.fileName, session.hash, mappingHash, new Date().toISOString(), Number(!rows.some((row) => row.state === 'rejected')));
       const classify = categorizer(db);
-      const reviewed = preview.review?.rows;
-      const changes = new Map<number, CategoryChoice>(input.review?.changes.map(({ row, choice }) => [row, choice]));
-      for (const row of changes.keys()) {
-        if (!reviewed?.has(row)) throw new UserError('Only uncategorized transactions can be updated during import.');
-      }
-      const resolved = new Map<string, string | null>();
-      const ruleApprovals = new Map<string, { pattern: ReviewPattern; categories: Set<string | null> }>();
+      const selectedCategories = input.review ? this.selections(db, reviewed, input.review.changes) : new Map<number, string | null>();
+      const selectedRules = new Set(input.review?.ruleKeys);
+      const approvals = selectedRules.size
+        ? this.ruleAssignments(preview.review, selectedCategories).filter(({ key }) => selectedRules.has(key)) : [];
+      if (approvals.length !== selectedRules.size) throw new UserError('Rule assignments changed. Review the rules again.');
       const insert = db.prepare(`INSERT INTO transactions(id,account_id,batch_id,date,amount,description,normalized,balance,reference,
           treatment,category_id,classification,rule_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`);
       const audit = db.prepare('INSERT INTO import_rows VALUES(?,?,?,?,?,?)');
@@ -321,23 +450,13 @@ export class Imports {
         if (state === 'accepted' && row.candidate) {
           const candidate = row.candidate;
           const classification = classify({ ...candidate, accountId: session.accountId, merchant: '' });
-          const reviewedRow = input.review && reviewed?.get(row.row);
+          const reviewedRow = input.review && reviewed.get(row.row);
           let selected = classification.categoryId;
           if (reviewedRow) {
             if (classification.categoryId || classification.treatment !== reviewedRow.treatment) {
               throw new UserError('Categorization rules changed after validation. Validate the statement again.');
             }
-            const choice = changes.get(row.row) ?? (reviewedRow.suggestion ? 'suggested' : '');
-            const key = JSON.stringify([choice, reviewedRow.treatment, choice === 'suggested' ? reviewedRow.suggestion : undefined]);
-            if (!resolved.has(key)) resolved.set(key, resolveCategoryChoice(db, choice, reviewedRow.treatment, reviewedRow.suggestion));
-            selected = resolved.get(key) ?? null;
-            const pattern = input.review?.saveRules ? preview.review?.patterns.get(row.row) : undefined;
-            if (pattern) {
-              const key = patternKey(pattern);
-              const approval = ruleApprovals.get(key) ?? { pattern, categories: new Set<string | null>() };
-              approval.categories.add(selected);
-              ruleApprovals.set(key, approval);
-            }
+            selected = selectedCategories.get(row.row) ?? null;
           }
           transactionId = randomUUID();
           insert.run(transactionId, session.accountId, counts.id, candidate.date, candidate.amount, candidate.description,
@@ -350,10 +469,6 @@ export class Imports {
         if (state === 'duplicate') counts.duplicate++;
         audit.run(counts.id, row.row, state, row.message, JSON.stringify(row.original), transactionId);
       }
-      const approvals = [...ruleApprovals.values()].flatMap(({ pattern, categories }) => {
-        const [id] = categories;
-        return categories.size === 1 && id ? [{ pattern, categoryId: id }] : [];
-      });
       const rulesSaved = approvals.length ? saveApprovedRules(db, approvals).size : 0;
       db.prepare('UPDATE accounts SET mapping=? WHERE id=?').run(JSON.stringify(preview.mapping), session.accountId);
       return rulesSaved ? { ...counts, rulesSaved } : counts;

@@ -39,7 +39,7 @@ On Windows, open `%APPDATA%\iCash` to locate application data. Profiles under `p
 
 Open **Settings → OpenAI**, enter a project API key, and choose **Verify and connect**. iCash protects the key with the operating system key store for the active household. Portable backups omit the key, so reconnect OpenAI after restoring a household.
 
-Validating a statement opens a review of new uncategorized rows. With OpenAI connected, iCash groups repeated descriptions and requests suggestions in batches of up to 24 groups. If the household has no expense categories, it proposes reusable categories such as Supermarkets, Pharmacy, or Transaction Charges. You can change these suggestions before importing and optionally save matching rules.
+Validating a statement opens a review of new uncategorized rows. With OpenAI connected, iCash groups repeated descriptions and requests suggestions in batches of up to 24 groups. If the household has no expense categories, it proposes reusable categories such as Supermarkets, Pharmacy, or Transaction Charges. The Categories page lets you edit, delete, or accept each proposed category. Once all proposals are reviewed, return to the import to assign transaction categories and choose which matching rules to save.
 
 In **Rules**, choose **Suggest rules with AI** to review patterns from uncategorized imported transactions. Approve the rules and any accompanying expense categories you want. You can also apply the approved rules to matching uncategorized transactions already in the ledger. In **Transactions**, select the pencil to edit in a modal or the sparkle icon to confirm a one-off AI classification.
 

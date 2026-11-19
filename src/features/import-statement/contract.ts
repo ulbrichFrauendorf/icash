@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { id } from '../../shared/schema';
+import { id, name } from '../../shared/schema';
 import { categoryChoice, type SuggestedCategory } from '../openai/contract';
 
 export const statementLimit = 12 * 1024 * 1024;
@@ -29,11 +29,19 @@ export const mapping = z.object({
     return columns.length === new Set(columns).size;
   }, 'Use a different column for each field.');
 export const previewInput = z.object({ token: id, mapping });
+export const importVersion = z.object({ token: id, version: id });
+export const moderateCategoryInput = importVersion.extend({
+  proposalId: id,
+  action: z.enum(['edit', 'accept', 'delete']),
+  edit: z.object({ name, group: name }).optional(),
+});
+export const importCategoryChanges = z.array(z.object({ row: z.int().positive(), choice: categoryChoice })).max(60000);
+export const importRulesInput = importVersion.extend({ changes: importCategoryChanges });
 export const commitInput = z.object({
   token: id, version: id, acceptRejected: z.boolean(),
   review: z.object({
-    changes: z.array(z.object({ row: z.int().positive(), choice: categoryChoice })).max(60000),
-    saveRules: z.boolean(),
+    changes: importCategoryChanges,
+    ruleKeys: z.array(z.string().max(1500)).max(60000),
   }).optional(),
 }).strict();
 export type Mapping = z.infer<typeof mapping>;
@@ -45,7 +53,7 @@ export type RowPreview = {
 };
 export type ImportPreview = {
   version: string; counts: Record<RowPreview['state'], number>; debits: number; credits: number; net: number;
-  rows: RowPreview[]; reconciliation: string | null; review?: ImportReview;
+  rows: RowPreview[]; reconciliation: string | null; review?: ImportReview; pendingCategories?: number;
 };
 export type ImportReviewRow = {
   row: number; description: string; date: string; amount: number; treatment: 'expense' | 'income';
@@ -55,3 +63,14 @@ export type ImportReview = { rows: ImportReviewRow[]; suggested: number; notice?
 export type ImportResult = { id: string; inserted: number; duplicate: number; rejected: number; rulesSaved?: number };
 export type Batch = ImportResult & { account: string; file: string; createdAt: string; skipped: number };
 export type AuditRow = { row: number; state: string; message: string; transactionId: string | null; original: string[] };
+
+export type CategoryProposal = {
+  id: string; name: string; group: string; rows: number;
+  status: 'pending' | 'accepted' | 'deleted';
+};
+export type ImportModeration = {
+  token: string; version: string; fileName: string; proposals: CategoryProposal[];
+};
+export type ResumableImport = { file: FilePreview; mapping: Mapping; accountId: string; preview: ImportPreview };
+export type ImportRule = { key: string; name: string; match: string; direction: 'debit' | 'credit';
+  category: string; categoryId: string; kind: ImportReviewRow['treatment']; rows: number[]; };

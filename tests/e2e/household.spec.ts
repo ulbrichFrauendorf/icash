@@ -192,7 +192,7 @@ test('reviews OpenAI classifications and imported rules before saving', async ()
         };
         const suggestions = samples.map((sample) => ({
           index: sample.index, category: null, reason: 'Merchant type.',
-          newExpense: sample.description.includes('BAKERY') ? 'Bakery Visits' : 'Shoe Repairs',
+          newExpense: sample.description.includes('BAKERY') ? 'Bakery Visits' : sample.description.includes('MARKET') ? 'Market Shopping' : 'Shoe Repairs',
           ...(body.text.format.name === 'icash_rules' ? {
             ruleName: sample.description.includes('COBBLER') ? 'Synthetic Cobbler' : null, ruleMatch: sample.description,
           } : {}),
@@ -221,17 +221,28 @@ test('reviews OpenAI classifications and imported rules before saving', async ()
     await expect(fileInput).toBeEnabled();
     await fileInput.setInputFiles(statement);
     await page.getByRole('button', { name: 'Validate statement' }).click();
+    const next = page.getByRole('button', { name: 'Continue to rule assignments' });
+    await expect(next).toBeDisabled();
+    await page.getByRole('button', { name: 'Delete proposal for Bakery Visits' }).click();
+    await page.getByRole('button', { name: 'Edit proposal for Shoe Repairs' }).click();
+    const proposal = page.getByRole('dialog', { name: 'Edit proposed category' });
+    await proposal.getByLabel('Category name').fill('Shoe and Bag Repairs');
+    await proposal.getByRole('button', { name: 'Save proposal' }).click();
+    await page.getByRole('button', { name: 'Accept Shoe and Bag Repairs' }).click();
+    await page.getByRole('button', { name: 'Accept Market Shopping' }).click();
+    await next.click();
     const importReview = page.getByRole('dialog', { name: 'Review import categories' });
-    await expect(importReview).toContainText('3 AI suggestions');
-    const chooseImportCategory = async (row: number, category: string) => {
-      await importReview.getByRole('button', { name: 'Change category for row ' + row, exact: true }).click();
-      await importReview.getByRole('button', { name: new RegExp('^Category for row ' + row + ':') }).click();
-      await page.getByRole('option', { name: category, exact: true }).click();
-    };
-    await chooseImportCategory(2, 'Leave uncategorized');
-    await chooseImportCategory(3, 'Leave uncategorized');
-    await chooseImportCategory(4, 'Groceries / Supermarkets');
-    await importReview.getByRole('button', { name: 'Import transactions', exact: true }).click();
+    await expect(importReview).toContainText('2 AI suggestions');
+    await expect(importReview.getByText('Miscellaneous / Shoe and Bag Repairs')).toBeVisible();
+    await importReview.getByRole('button', { name: 'Review rules' }).click();
+    const importRules = page.getByRole('dialog', { name: 'Review import rules' });
+    await expect(importRules.getByText('Miscellaneous / Shoe and Bag Repairs')).toBeVisible();
+    await importRules.getByRole('button', { name: 'Change rule category for Synthetic Market' }).click();
+    await importRules.getByRole('button', { name: /^Category for Synthetic Market:/ }).click();
+    await page.getByRole('option', { name: 'Groceries / Supermarkets', exact: true }).click();
+    await importRules.getByRole('button', { name: 'Skip Synthetic Market' }).click();
+    await importRules.getByRole('button', { name: 'Import and save selected rules' }).click();
+    await expect(page.getByText(/Saved 1 rule/)).toBeVisible();
     await expect(page.getByRole('status').filter({ hasText: /3 added/ })).toBeVisible();
 
     await nav('Transactions');
@@ -249,26 +260,33 @@ test('reviews OpenAI classifications and imported rules before saving', async ()
     await expect(bakery).toContainText('Bakery Visits');
 
     await nav('Rules');
-    await page.getByRole('button', { name: 'Suggest rules with AI' }).click();
-    const rules = page.getByRole('dialog', { name: 'Review AI rule suggestions' });
-    const changeCobbler = page.getByRole('button', { name: 'Change category for SYNTHETIC COBBLER' });
-    const cobblerSuggestion = rules.locator('cdk-virtual-scroll-viewport .i-table-virtual-row').filter({ has: changeCobbler });
-    await expect(cobblerSuggestion.getByText('Synthetic Cobbler', { exact: true })).toBeVisible();
-    await expect(cobblerSuggestion.getByText('SYNTHETIC COBBLER', { exact: true })).toBeVisible();
-    await expect(rules.getByText('Description contains', { exact: true })).toBeVisible();
-    await changeCobbler.click();
-    await expect(rules.getByRole('button', { name: /Category for SYNTHETIC COBBLER:.*Shoe Repairs/ })).toBeVisible();
-    await rules.getByRole('button', { name: 'Save and apply to uncategorized' }).click();
-    await expect(page.getByText('Saved 1 rule and categorized 1 imported transaction.')).toBeVisible();
+    await expect(page.getByText('Synthetic Cobbler', { exact: true })).toBeVisible();
+    await expect(page.getByText('Miscellaneous / Shoe and Bag Repairs', { exact: true })).toBeVisible();
     await nav('Transactions');
     const classifyCobbler = page.getByRole('button', { name: 'AI classify Synthetic Cobbler' });
     const cobbler = page.locator('i-table .i-table-virtual-row').filter({ has: classifyCobbler });
-    await expect(cobbler).toContainText('Shoe Repairs');
+    await expect(cobbler).toContainText('Shoe and Bag Repairs');
     await classifyCobbler.click();
     const existingRule = page.getByRole('dialog', { name: 'Apply existing rule' });
-    await expect(existingRule.getByText('Miscellaneous / Shoe Repairs', { exact: true })).toBeVisible();
+    await expect(existingRule.getByText('Miscellaneous / Shoe and Bag Repairs', { exact: true })).toBeVisible();
     await existingRule.getByRole('button', { name: 'Apply classification' }).click();
     await expect(page.getByText('Existing rule applied.')).toBeVisible();
+
+    await nav('Categories');
+    const miscellaneous = page.getByRole('row').filter({ has: page.getByRole('cell', { name: 'Miscellaneous', exact: true }) });
+    await miscellaneous.getByRole('button', { name: 'Expand details' }).click();
+    await page.getByRole('button', { name: 'Archive Market Shopping' }).click();
+    await expect(page.getByText('Category archived.')).toBeVisible();
+    const expandMiscellaneous = miscellaneous.getByRole('button', { name: 'Expand details' });
+    if (await expandMiscellaneous.count()) await expandMiscellaneous.click();
+    await expect(page.getByRole('button', { name: 'Restore Market Shopping' })).toBeVisible();
+    const transport = page.getByRole('row').filter({ has: page.getByRole('cell', { name: 'Transport', exact: true }) });
+    await transport.getByRole('button', { name: 'Expand details' }).click();
+    await page.getByRole('button', { name: 'Delete Fuel', exact: true }).click();
+    const deletion = page.getByRole('dialog', { name: 'Confirm action' });
+    await expect(deletion).toContainText('linked rules');
+    await deletion.getByRole('button', { name: 'Confirm', exact: true }).click();
+    await expect(page.getByText('Category deleted.')).toBeVisible();
   } finally {
     await app.close();
     rmSync(root, { recursive: true, force: true });

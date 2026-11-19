@@ -231,7 +231,9 @@
             height="20rem"
           />
           <div class="actions">
-            @if (data.review) {
+            @if (data.pendingCategories) {
+              <i-button [disabled]="ui.busy()" (clicked)="ui.go('Categories')">Review proposed categories</i-button>
+            } @else if (data.review) {
               <i-button [disabled]="ui.busy()" (clicked)="openReview()">Review categories</i-button>
             } @else {
               <i-button [disabled]="ui.busy() || (!data.counts.accepted && !!data.counts.rejected)" (clicked)="commit()">
@@ -278,7 +280,7 @@
               (ngModelChange)="chooseCategory(row.row, $event.value)" />
           </div>
         }
-        <p class="muted">Selected new expense categories are created on import. Saving rules uses only transaction patterns with a consistent category.</p>
+        <p class="muted">Review rules after choosing transaction categories. A rule requires a consistent category for its matching transactions.</p>
         @if (ui.error(); as error) {
           <i-message severity="danger">{{ error }}</i-message>
         }
@@ -286,7 +288,32 @@
       <div slot="footer" class="actions">
         <i-button severity="secondary" [disabled]="ui.busy()" (clicked)="closeReview()">Back</i-button>
         <i-button severity="secondary" [outlined]="true" [disabled]="ui.busy()" (clicked)="commit()">Import transactions</i-button>
-        <i-button [disabled]="ui.busy()" (clicked)="commit(true)">Import and save rules</i-button>
+        <i-button [disabled]="ui.busy()" (clicked)="reviewRules()">Review rules</i-button>
+      </div>
+    </i-dialog>
+  }
+  @if (ruleReview(); as rules) {
+    <i-dialog header="Review import rules" width="58rem" [visible]="true" [closable]="!ui.busy()"
+      (visibleChange)="!$event && backToAssignments()">
+      <div class="stack">
+        <p>Choose which rules to save for future statements. Changing a rule’s category updates its matching transactions in this import.</p>
+        <i-table [grid]="ruleGrid()" dataKey="key" size="small" [sortable]="true" [globalFilter]="true"
+          [virtualScroll]="true" height="min(35dvh, 19rem)" emptyMessage="No matching rules to save." />
+        @if (activeRule(); as rule) {
+          @let choices = ruleOptions(rule);
+          <i-select [label]="'Category for ' + rule.name" [options]="choices" optionLabel="label" [fluid]="true"
+            [disabled]="ui.busy()" [ngModel]="selected(choices, rule.categoryId)"
+            (ngModelChange)="assignRuleCategory(rule, $event)" />
+        }
+        @if (ui.error(); as error) {
+          <i-message severity="danger">{{ error }}</i-message>
+        }
+      </div>
+      <div slot="footer" class="actions">
+        <i-button severity="secondary" [disabled]="ui.busy()" (clicked)="backToAssignments()">Back</i-button>
+        <i-button [disabled]="ui.busy()" (clicked)="importWithRules()">
+          {{ rules.length && ruleKeys().size ? 'Import and save selected rules' : 'Import transactions' }}
+        </i-button>
       </div>
     </i-dialog>
   }

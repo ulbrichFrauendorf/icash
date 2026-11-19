@@ -6,12 +6,12 @@ import { z } from 'zod';
 import { accounts, saveAccount } from '../../features/accounts/main';
 import { saveAccountInput } from '../../features/accounts/contract';
 import { exportBackup, restoreBackup } from '../../features/backup-restore/main';
-import { categoryUsage, categories, mergeCategories, restoreDefaults, saveCategory } from '../../features/categories/main';
-import { mergeInput, saveCategoryInput } from '../../features/categories/contract';
+import { categories, deleteCategory, previewCategoryDeletion, restoreDefaults, saveCategory } from '../../features/categories/main';
+import { deleteCategoryInput, saveCategoryInput } from '../../features/categories/contract';
 import { portableTemplate, Templates } from '../../features/categories/portable';
 import { merchantInput, saveRuleInput } from '../../features/categorization/contract';
 import { listRules, recategorize, saveMerchant, saveRule } from '../../features/categorization/main';
-import { commitInput, decodeInput, previewInput, selectImportInput } from '../../features/import-statement/contract';
+import { commitInput, decodeInput, importRulesInput, moderateCategoryInput, previewInput, selectImportInput } from '../../features/import-statement/contract';
 import { auditRows, batches, Imports } from '../../features/import-statement/main';
 import { allocationInput, closeInput, copyInput, defaultInput, monthInput } from '../../features/monthly-budget/contract';
 import { copyBudget, getBudget, recommend, saveAllocation, saveDefault, setClosed } from '../../features/monthly-budget/main';
@@ -126,8 +126,8 @@ export function registerHandlers(profiles: ProfileStore, window: () => BrowserWi
   handle('saveAccount', saveAccountInput, (input) => saveAccount(db(), input));
   handle('categories', empty, () => categories(db()));
   handle('saveCategory', saveCategoryInput, (input) => saveCategory(db(), input));
-  handle('categoryUsage', profileIdInput, ({ id }) => categoryUsage(db(), id));
-  handle('mergeCategories', mergeInput, (input) => mergeCategories(db(), input));
+  handle('previewCategoryDeletion', profileIdInput, ({ id }) => previewCategoryDeletion(db(), id));
+  handle('deleteCategory', deleteCategoryInput, (input) => deleteCategory(db(), input));
   handle('restoreDefaults', empty, () => restoreDefaults(db()));
   handle('exportTemplate', empty, () => saveText('Export category template', 'icash-categories.json', () => JSON.stringify(portableTemplate(db()), null, 2)));
   handle('previewTemplate', empty, async () => {
@@ -163,8 +163,12 @@ export function registerHandlers(profiles: ProfileStore, window: () => BrowserWi
         notice = error.message + ' You can choose categories here.';
       }
     }
-    return { ...preview, review: imports.setReview(profile.id, token, preview.version, rows, suggestions, notice) };
+    return imports.setReview(profile.db, profile.id, token, preview.version, rows, suggestions, notice);
   });
+  handle('importModeration', empty, () => imports.moderation(active().id));
+  handle('moderateImportCategory', moderateCategoryInput, (input) => imports.moderateCategory(db(), active().id, input));
+  handle('resumeImport', empty, () => imports.resume(db(), active().id));
+  handle('reviewImportRules', importRulesInput, (input) => imports.reviewRules(db(), active().id, input));
   handle('commitImport', commitInput, (input) => imports.commit(db(), active().id, input));
   handle('cancelImport', profileIdInput, ({ id }) => { imports.cancel(active().id, id); });
   handle('exportErrors', profileIdInput, ({ id }) => saveText('Export rejected rows', 'icash-import-errors.csv', () =>

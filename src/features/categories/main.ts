@@ -3,7 +3,7 @@ import type { z } from 'zod';
 import type { Db } from '../../platform/main/database';
 import { UserError } from '../../shared/schema';
 import { defaultRules, householdTemplate, householdTemplateVersion } from './template';
-import type { Category, mergeInput, saveCategoryInput } from './contract';
+import type { Category, deleteCategoryInput, saveCategoryInput } from './contract';
 
 export function categories(db: Db): Category[] {
   const rows = db.prepare(`
@@ -26,10 +26,6 @@ function usage(db: Db, id: string) {
       (SELECT count(*) FROM monthly_allocations WHERE category_id=@id) AS allocations,
       (SELECT count(*) FROM budget_defaults WHERE category_id=@id) AS defaults
   `).get({ id }) as Record<string, number>;
-}
-
-export function categoryUsage(db: Db, id: string) {
-  return usage(db, id);
 }
 
 export function saveCategory(db: Db, input: z.infer<typeof saveCategoryInput>): Category[] {
@@ -61,26 +57,36 @@ export function saveCategory(db: Db, input: z.infer<typeof saveCategoryInput>): 
   return categories(db);
 }
 
-export function mergeCategories(db: Db, { from, to }: z.infer<typeof mergeInput>): Category[] {
+export function previewCategoryDeletion(db: Db, id: string) {
+  if (!db.prepare('SELECT id FROM categories WHERE id=?').get(id)) throw new UserError('Category was not found.');
+  if (db.prepare('SELECT id FROM categories WHERE parent_id=? LIMIT 1').get(id)) {
+    throw new UserError('Move or delete the categories in this group first.');
+  }
+  const used = usage(db, id);
+  const transfer = db.prepare("SELECT 1 FROM transfer_legs WHERE json_extract(previous,'$.category_id')=? LIMIT 1").get(id);
+  if (used.transactions || used.splits || used.allocations || used.defaults || transfer) {
+    throw new UserError('This category is used in the ledger or a budget. Archive it to keep its history.');
+  }
+  const rules = db.prepare('SELECT id FROM rules WHERE category_id=? ORDER BY id').all(id) as { id: string }[];
+  return { ruleIds: rules.map((rule) => rule.id) };
+}
+
+export function deleteCategory(db: Db, input: z.infer<typeof deleteCategoryInput>): Category[] {
   return db.transaction(() => {
-    const list = categories(db);
-    const source = list.find((category) => category.id === from);
-    const target = list.find((category) => category.id === to);
-    if (!source?.leaf || !target?.leaf || target.archived || source.kind !== target.kind || from === to) {
-      throw new UserError('Choose two different categories of the same type and an active destination.');
+    const { id, expectedRuleIds } = input;
+    const { ruleIds } = previewCategoryDeletion(db, id);
+    if (JSON.stringify(ruleIds) !== JSON.stringify([...expectedRuleIds].sort())) {
+      throw new UserError('The linked rules changed. Review the deletion again.');
     }
-    for (const [table, period] of [['monthly_allocations', 'month'], ['budget_defaults', 'effective']] as const) {
-      if (db.prepare(`SELECT 1 FROM ${table} a JOIN ${table} b ON a.${period}=b.${period}
-        WHERE a.category_id=? AND b.category_id=?`).get(from, to)) {
-        throw new UserError('Both categories have a budget entry in the same period. Resolve the overlapping entries before merging.');
-      }
-    }
-    for (const table of ['transactions','splits','rules','merchant_mappings','monthly_allocations','budget_defaults']) {
-      db.prepare(`UPDATE ${table} SET category_id=? WHERE category_id=?`).run(to, from);
-    }
-    db.prepare('UPDATE categories SET archived=1 WHERE id=?').run(from);
+    db.prepare(`UPDATE transactions SET rule_id=NULL, classification='manual'
+      WHERE rule_id IN (SELECT id FROM rules WHERE category_id=?)`).run(id);
+    db.prepare(`UPDATE transfer_legs SET previous=json_set(previous, '$.rule_id', NULL, '$.classification', 'manual')
+      WHERE json_extract(previous, '$.rule_id') IN (SELECT id FROM rules WHERE category_id=?)`).run(id);
+    db.prepare('DELETE FROM rules WHERE category_id=?').run(id);
+    db.prepare('DELETE FROM merchant_mappings WHERE category_id=?').run(id);
+    db.prepare('DELETE FROM categories WHERE id=?').run(id);
     return categories(db);
-  })();
+  }).immediate();
 }
 
 export function restoreDefaults(db: Db): Category[] {

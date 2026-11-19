@@ -9,7 +9,7 @@ import { AiCategorization, reviewSample } from '../src/features/openai/main';
 import { OpenAiClient } from '../src/features/openai/client';
 import { saveAccount } from '../src/features/accounts/main';
 import { exportBackup, restoreBackup } from '../src/features/backup-restore/main';
-import { categories, mergeCategories, restoreDefaults, saveCategory } from '../src/features/categories/main';
+import { categories, deleteCategory, previewCategoryDeletion, restoreDefaults, saveCategory } from '../src/features/categories/main';
 import { listRules, recategorize, saveRule } from '../src/features/categorization/main';
 import { Imports } from '../src/features/import-statement/main';
 import { commitInput, mapping as mappingSchema, type ImportPreview, type Mapping } from '../src/features/import-statement/contract';
@@ -191,7 +191,7 @@ it('rolls back the entire import when a later database write fails', async () =>
   expect(db().prepare('SELECT count(*) AS count FROM import_batches').get()).toEqual({ count: 0 });
 });
 
-it('keeps manual classifications and exact splits through bulk rules and merge', async () => {
+it('keeps manual classifications and exact splits through bulk rules', async () => {
   const main = account();
   await importFile(fixture('absa-current.csv'), main.id);
   const grocery = category('Supermarkets');
@@ -204,9 +204,22 @@ it('keeps manual classifications and exact splits through bulk rules and merge',
     conditions: { field: 'description', operator: 'contains', text: 'CHECKERS' } });
   expect(recategorize(db(), true).protected).toBe(1);
   expect(transactionDetail(db(), purchase.id).splits).toHaveLength(2);
-  mergeCategories(db(), { from: other.id, to: grocery.id });
-  expect(transactionDetail(db(), purchase.id).splits.map((line) => line.categoryId)).toEqual([grocery.id, grocery.id]);
+  expect(transactionDetail(db(), purchase.id).splits.map((line) => line.categoryId)).toEqual([grocery.id, other.id]);
+  expect(() => previewCategoryDeletion(db(), other.id)).toThrow(/Archive it/);
+  saveCategory(db(), { ...other, archived: true });
+  expect(transactionDetail(db(), purchase.id).splits).toHaveLength(2);
   expect(listTransactions(db(), filters.parse({ text: 'Checkers' }))).toHaveLength(2);
+});
+
+it('deletes an unused category with exactly the linked rules confirmed by the user', () => {
+  const fuel = category('Fuel');
+  const { ruleIds } = previewCategoryDeletion(db(), fuel.id);
+  expect(ruleIds.length).toBeGreaterThan(0);
+  expect(() => deleteCategory(db(), { id: fuel.id, expectedRuleIds: [] })).toThrow(/linked rules changed/);
+  expect(category('Fuel').id).toBe(fuel.id);
+  const after = deleteCategory(db(), { id: fuel.id, expectedRuleIds: ruleIds });
+  expect(after.some((row) => row.id === fuel.id)).toBe(false);
+  expect(listRules(db()).some((rule) => rule.categoryId === fuel.id)).toBe(false);
 });
 
 it('reconciles reports, budgets, reversals, transfers, savings, and portable recovery', async () => {
@@ -498,16 +511,33 @@ it('reviews a full statement in batches and proposes expenses for an empty house
   await ai.connect('sk-icash-synthetic-key');
   const { suggestions } = await ai.suggestForRows(rows, true);
   expect(sizes).toEqual([24, 3]);
-  const review = imports.setReview(active().id, token, previewed.version, rows, suggestions);
-  expect(review.suggested).toBe(28);
+  const review = imports.setReview(db(), active().id, token, previewed.version, rows, suggestions);
+  expect(review.pendingCategories).toBe(4);
   expect(categories(db())).toHaveLength(0);
-  imports.commit(db(), active().id, { token, version: previewed.version, acceptRejected: false,
-    review: { changes: [], saveRules: true } });
-  expect(categories(db()).filter((item) => item.parentId).map(({ name }) => name).sort()).toEqual(['Gardening', 'Mobile Phones', 'Streaming', 'Supermarkets']);
-  expect(category('Gardening').parentId).toBe(category('House and garden').id);
+  const version = previewed.version;
+  expect(() => imports.reviewRules(db(), active().id, { token, version, changes: [] })).toThrow(/Categories page/);
+  expect(() => imports.commit(db(), active().id, { token, version, acceptRejected: false })).toThrow(/Categories page/);
+  const moderation = imports.moderation(active().id)!;
+  expect(moderation.proposals.find((proposal) => proposal.name === 'Supermarkets')?.rows).toBe(25);
+  for (const proposal of moderation.proposals) {
+    const request = { token, version, proposalId: proposal.id };
+    if (proposal.name === 'Gardening') {
+      imports.moderateCategory(db(), active().id, { ...request, action: 'edit', edit: { group: proposal.group, name: 'Garden care' } });
+    }
+    imports.moderateCategory(db(), active().id, { ...request, action: proposal.name === 'Streaming' ? 'delete' : 'accept' });
+  }
+  const ready = imports.resume(db(), active().id)!;
+  expect(ready.preview.review?.suggested).toBe(27);
+  expect(transactions()).toHaveLength(0);
+  const rules = imports.reviewRules(db(), active().id, { token, version, changes: [] });
+  imports.commit(db(), active().id, { token, version, acceptRejected: false,
+    review: { changes: [], ruleKeys: rules.map((rule) => rule.key) } });
+  expect(categories(db()).filter((item) => item.parentId).map(({ name }) => name).sort()).toEqual(['Garden care', 'Mobile Phones', 'Supermarkets']);
+  expect(category('Garden care').parentId).toBe(category('House and garden').id);
   expect(category('Supermarkets').parentId).toBe(category('Groceries').id);
-  expect(transaction('SHOP 12345678 GARDEN SERVICE').categoryId).toBe(category('Gardening').id);
-  expect(listRules(db()).some((rule) => rule.categoryId === category('Gardening').id)).toBe(false);
+  expect(transaction('SHOP 12345678 GARDEN SERVICE').categoryId).toBe(category('Garden care').id);
+  expect(transaction('OVERSEAS PURCHASE (EFFEC 02052025) MUSIC STREAM CARD NO. 4567').categoryId).toBeNull();
+  expect(listRules(db()).some((rule) => rule.categoryId === category('Garden care').id)).toBe(false);
 });
 
 it('rejects unsuccessful OpenAI responses without storing the failed key', async () => {
@@ -580,11 +610,14 @@ it('reviews only new uncategorized statement rows and saves consistent overrides
     operator: 'contains', direction: 'debit', samples: 2, reason: '',
     category: { id: fuel.id, label: fuel.name, name: fuel.name, kind: 'expense' },
   } as const;
-  const reviewed = imports.setReview(active().id, token, statement.version, rows,
+  const reviewed = imports.setReview(db(), active().id, token, statement.version, rows,
     new Map([[reviewSample(rows[0]!).key, { category: rule.category, rule }]]));
-  expect(reviewed.suggested).toBe(2);
+  expect(reviewed.review?.suggested).toBe(2);
+  const changes = [{ row: 3, choice: groceries.id }, { row: 4, choice: groceries.id }];
+  const rules = imports.reviewRules(db(), active().id, { token, version: statement.version, changes });
+  expect(rules).toHaveLength(1);
   const result = imports.commit(db(), active().id, { token, version: statement.version, acceptRejected: false,
-    review: { changes: [{ row: 3, choice: groceries.id }, { row: 4, choice: groceries.id }], saveRules: true } });
+    review: { changes, ruleKeys: rules.map((rule) => rule.key) } });
   expect(result).toMatchObject({ inserted: 3, duplicate: 1, rulesSaved: 1 });
   const shop = transactions().filter((row) => row.description === 'Synthetic shop Rivonia CARD NO');
   expect(shop.map((row) => row.categoryId)).toEqual([groceries.id, groceries.id]);

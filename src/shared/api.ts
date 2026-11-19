@@ -1,9 +1,9 @@
 import type { z } from 'zod';
 import type { Account, saveAccountInput } from '../features/accounts/contract';
-import type { Category, mergeInput, saveCategoryInput } from '../features/categories/contract';
+import type { Category, CategoryDeletion, deleteCategoryInput, saveCategoryInput } from '../features/categories/contract';
 import type { TemplatePreview } from '../features/categories/portable';
 import type { merchantInput, Rule, RulePreview, saveRuleInput } from '../features/categorization/contract';
-import type { AuditRow, Batch, commitInput, decodeInput, FilePreview, ImportPreview, ImportResult, previewInput, selectImportInput } from '../features/import-statement/contract';
+import type { AuditRow, Batch, commitInput, decodeInput, FilePreview, ImportPreview, ImportModeration, ImportRule, ResumableImport, moderateCategoryInput, importRulesInput, ImportResult, previewInput, selectImportInput } from '../features/import-statement/contract';
 import type { allocationInput, Budget, closeInput, copyInput, defaultInput, Recommendations } from '../features/monthly-budget/contract';
 import type { AiClassification, AiRules, AiStatus, applyAiRulesInput, openAiKeyInput } from '../features/openai/contract';
 import type { createProfileInput, payDayInput, ProfileState, selectThemeInput } from '../features/profiles/contract';
@@ -34,8 +34,8 @@ export interface Requests {
   saveAccount: [Data<typeof saveAccountInput>, Account[]];
   categories: [undefined, Category[]];
   saveCategory: [Data<typeof saveCategoryInput>, Category[]];
-  categoryUsage: [ID, Record<string, number>];
-  mergeCategories: [Data<typeof mergeInput>, Category[]];
+  previewCategoryDeletion: [ID, CategoryDeletion];
+  deleteCategory: [Data<typeof deleteCategoryInput>, Category[]];
   restoreDefaults: [undefined, Category[]];
   exportTemplate: [undefined, boolean];
   previewTemplate: [undefined, TemplatePreview | null];
@@ -43,6 +43,10 @@ export interface Requests {
   selectImport: [Data<typeof selectImportInput>, FilePreview];
   decodeImport: [Data<typeof decodeInput>, FilePreview];
   previewImport: [Data<typeof previewInput>, ImportPreview];
+  importModeration: [undefined, ImportModeration | null];
+  moderateImportCategory: [Data<typeof moderateCategoryInput>, ImportModeration | null];
+  resumeImport: [undefined, ResumableImport | null];
+  reviewImportRules: [Data<typeof importRulesInput>, ImportRule[]];
   commitImport: [Data<typeof commitInput>, ImportResult];
   cancelImport: [ID, void];
   exportErrors: [ID, boolean];
@@ -88,9 +92,11 @@ export const channels: { [K in keyof Requests]: K } = {
   openAiStatus: 'openAiStatus', connectOpenAi: 'connectOpenAi', disconnectOpenAi: 'disconnectOpenAi',
   suggestAiCategory: 'suggestAiCategory', applyAiCategory: 'applyAiCategory', suggestAiRules: 'suggestAiRules', applyAiRules: 'applyAiRules',
   setTheme: 'setTheme', setPayDay: 'setPayDay', accounts: 'accounts', saveAccount: 'saveAccount',
-  categories: 'categories', saveCategory: 'saveCategory', categoryUsage: 'categoryUsage',
-  mergeCategories: 'mergeCategories', restoreDefaults: 'restoreDefaults', exportTemplate: 'exportTemplate',
+  categories: 'categories', saveCategory: 'saveCategory', previewCategoryDeletion: 'previewCategoryDeletion',
+  deleteCategory: 'deleteCategory', restoreDefaults: 'restoreDefaults', exportTemplate: 'exportTemplate',
   previewTemplate: 'previewTemplate', commitTemplate: 'commitTemplate', selectImport: 'selectImport',
+  importModeration: 'importModeration', moderateImportCategory: 'moderateImportCategory',
+  resumeImport: 'resumeImport', reviewImportRules: 'reviewImportRules',
   decodeImport: 'decodeImport', previewImport: 'previewImport', commitImport: 'commitImport', cancelImport: 'cancelImport', exportErrors: 'exportErrors',
   batches: 'batches', audit: 'audit', transactions: 'transactions', transaction: 'transaction',
   saveTransaction: 'saveTransaction', rules: 'rules', saveRule: 'saveRule', deleteRule: 'deleteRule',

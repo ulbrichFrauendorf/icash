@@ -6,7 +6,7 @@ import type { Account } from '../accounts/contract';
 import { ZarPipe } from '../../shared/ui/pipes';
 import { Ui } from '../../shared/ui/state';
 import { currencyColumn, sortableColumns, tableMoney } from '../../shared/ui/table-columns';
-import { statementLimit, type AuditRow, type Batch, type FilePreview, type ImportPreview, type ImportReview, type ImportReviewRow, type Mapping } from './contract';
+import { statementLimit, type AuditRow, type Batch, type FilePreview, type ImportPreview, type ImportReview, type ImportReviewRow, type ImportRule, type Mapping } from './contract';
 import type { Category } from '../categories/contract';
 import type { CategoryChoice } from '../openai/contract';
 import { reviewCategoryChoices } from '../../shared/ui/category-choices';
@@ -35,6 +35,23 @@ export class ImportPage {
     maxFileSize: statementLimit, maxTotalSize: statementLimit };
   readonly review = signal<ImportReview | null>(null);
   readonly reviewRow = signal<ImportReviewRow | null>(null);
+  readonly ruleReview = signal<ImportRule[] | null>(null);
+  readonly ruleFocus = signal<string | null>(null);
+  readonly activeRule = computed(() => this.ruleReview()?.find((rule) => rule.key === this.ruleFocus()));
+  readonly ruleKeys = signal(new Set<string>());
+  readonly ruleGrid = computed((): GridData<ImportRule> => ({
+    columns: sortableColumns([
+      { field: 'name', header: 'Rule' }, { field: 'match', header: 'Description contains' },
+      { field: 'direction', header: 'Direction' }, { field: 'category', header: 'Category' }, { field: 'status', header: 'Decision' },
+    ]),
+    rows: (this.ruleReview() ?? []).map((row) => ({ ...row, status: this.ruleKeys().has(row.key) ? 'Save' : 'Skip' })),
+    actions: [
+      { id: 'category', icon: 'pi pi-pencil', tooltip: (row) => 'Change rule category for ' + row.name,
+        handler: (row) => this.ruleFocus.set(row.key) },
+      { id: 'toggle', icon: 'pi pi-check', tooltip: (row) => (this.ruleKeys().has(row.key) ? 'Skip ' : 'Include ') + row.name,
+        handler: (row) => this.toggleRule(row.key) },
+    ],
+  }));
   private categories: Category[] = [];
   private readonly choices = signal(new Map<number, CategoryChoice>());
   delimiter: Mapping['delimiter'] = ',';
@@ -48,10 +65,25 @@ export class ImportPage {
   labels: Record<Column, string> = { date: 'Posting date', description: 'Description', amount: 'Amount', debit: 'Debit', credit: 'Credit', balance: 'Balance', reference: 'Reference' };
   constructor() {
     void this.ui.load(async () => {
-      const [accounts, batches] = await Promise.all([this.ui.api.accounts(), this.ui.api.batches()]);
+      const [accounts, batches, session] = await Promise.all([this.ui.api.accounts(), this.ui.api.batches(), this.ui.api.resumeImport()]);
       this.accounts.set(accounts.filter((a) => !a.archived));
       this.batches.set(batches);
-      if (this.accounts().length === 1) this.account = this.accounts()[0]!.id;
+      if (session) {
+        this.account = session.accountId;
+        this.file = session.file;
+        this.preview = session.preview;
+        this.delimiter = session.mapping.delimiter;
+        this.encoding = session.mapping.encoding;
+        this.header = session.mapping.header;
+        this.dateFormat = session.mapping.dateFormat;
+        this.decimal = session.mapping.decimal;
+        this.invert = session.mapping.invert;
+        this.useSuggestions(session.mapping);
+        if (session.preview.review) {
+          this.categories = await this.ui.api.categories();
+          this.openReview();
+        }
+      } else if (this.accounts().length === 1) this.account = this.accounts()[0]!.id;
     });
   }
   sourceGrid(file: FilePreview): GridData {
@@ -98,7 +130,7 @@ export class ImportPage {
       ]),
       rows: (this.review()?.rows ?? []).map((row) => {
         const choice = this.categorySelection(row);
-        const category = choice === 'suggested' ? row.suggestion?.label : byId.get(choice);
+        const category = choice === row.suggestion?.id ? row.suggestion.label : byId.get(choice);
         return { ...row, category: category ?? 'Uncategorized', amountValue: tableMoney(row.amount) };
       }),
       actions: [{ id: 'category', icon: 'pi pi-pencil', tooltip: (row) => 'Change category for row ' + row.row,
@@ -107,7 +139,7 @@ export class ImportPage {
   });
   fields(): Column[] { return ['date', 'description', ...(this.layout === 'signed' ? ['amount'] as const : ['debit', 'credit'] as const), 'balance', 'reference']; }
   headers() { return this.file?.headers ?? []; }
-  invalidate() { this.preview = null; this.closeReview(); this.choices.set(new Map()); }
+  invalidate() { this.preview = null; this.closeReview(); this.ruleReview.set(null); this.ruleKeys.set(new Set()); this.choices.set(new Map()); }
   reset() { this.files = []; this.file = null; this.invalidate(); }
   selectFiles(files: File[]) {
     const selected = files[0];
@@ -172,7 +204,8 @@ export class ImportPage {
           delimiter: this.delimiter, encoding: this.encoding, header: this.header, dateFormat: this.dateFormat,
           decimal: this.decimal, invert: this.invert,
         } });
-        if (this.preview.review) {
+        if (this.preview.pendingCategories) this.ui.go('Categories');
+        else if (this.preview.review) {
           this.categories = await this.ui.api.categories();
           this.openReview();
         }
@@ -180,10 +213,10 @@ export class ImportPage {
     });
   }
   categoryOptions(row: ImportReviewRow) {
-    return reviewCategoryChoices(this.categories, row.treatment, 'Leave uncategorized', row.suggestion);
+    return reviewCategoryChoices(this.categories, row.treatment, 'Leave uncategorized');
   }
   categorySelection(row: ImportReviewRow) {
-    return this.choices().get(row.row) ?? (row.suggestion ? 'suggested' : '');
+    return this.choices().get(row.row) ?? row.suggestion?.id ?? '';
   }
   chooseCategory(row: number, choice: CategoryChoice) {
     this.choices.update((choices) => new Map(choices).set(row, choice));
@@ -191,15 +224,44 @@ export class ImportPage {
   openReview() { this.review.set(this.preview?.review ?? null); }
   closeReview() { this.review.set(null); this.reviewRow.set(null); }
   errors() { return this.ui.run(async () => { if (this.file) await this.ui.api.exportErrors({ id: this.file.token }); }); }
-  commit(saveRules = false) {
+  private categoryChanges() { return [...this.choices()].map(([row, choice]) => ({ row, choice })); }
+  reviewRules() {
+    return this.ui.run(async () => {
+      if (!this.file || !this.preview) return;
+      const rules = await this.ui.api.reviewImportRules({ token: this.file.token, version: this.preview.version, changes: this.categoryChanges() });
+      this.ruleKeys.set(new Set(rules.map((rule) => rule.key)));
+      this.ruleFocus.set(null);
+      this.ruleReview.set(rules);
+      this.closeReview();
+    });
+  }
+  ruleOptions(rule: ImportRule) {
+    return reviewCategoryChoices(this.categories, rule.kind, '').filter((choice) => choice.value);
+  }
+  assignRuleCategory(rule: ImportRule, choice: { value: string; label: string }) {
+    const next = new Map(this.choices());
+    for (const row of rule.rows) next.set(row, choice.value);
+    this.choices.set(next);
+    this.ruleReview.update((rules) => rules?.map((item) => item.key === rule.key
+      ? { ...item, categoryId: choice.value, category: choice.label } : item) ?? null);
+  }
+  importWithRules() { return this.commit([...this.ruleKeys()]); }
+  toggleRule(key: string) {
+    const keys = new Set(this.ruleKeys());
+    if (keys.has(key)) keys.delete(key);
+    else keys.add(key);
+    this.ruleKeys.set(keys);
+  }
+  backToAssignments() { this.ruleReview.set(null); this.openReview(); }
+  commit(ruleKeys: string[] = []) {
     return this.ui.run(async () => {
       if (!this.file || !this.preview) return;
       const result = await this.ui.api.commitImport({ token: this.file.token, version: this.preview.version,
         acceptRejected: this.preview.counts.rejected > 0,
-        review: this.preview.review ? { saveRules, changes: [...this.choices()].map(([row, choice]) => ({ row, choice })) } : undefined });
+        review: this.preview.review ? { ruleKeys, changes: this.categoryChanges() } : undefined });
       this.reset();
       this.batches.set(await this.ui.api.batches());
-      this.ui.info.set(`Import complete. ${result.inserted} added, ${result.duplicate} duplicates, ${result.rejected} rejected.` + (result.rulesSaved ? ` Saved ${result.rulesSaved} rules.` : ''));
+      this.ui.info.set(`Import complete. ${result.inserted} added, ${result.duplicate} duplicates, ${result.rejected} rejected.` + (result.rulesSaved ? ` Saved ${result.rulesSaved} ${result.rulesSaved === 1 ? 'rule' : 'rules'}.` : ''));
     });
   }
   showAudit(batch: Batch) {

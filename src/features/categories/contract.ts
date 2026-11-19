@@ -12,7 +12,8 @@ export const categoryFields = z.object({
   excludeReports: z.boolean().default(false),
 });
 export const saveCategoryInput = categoryFields.extend({ id: id.optional(), parentId: id.nullable() });
-export const mergeInput = z.object({ from: id, to: id });
+export const deleteCategoryInput = z.object({ id, expectedRuleIds: z.array(id) });
+export type CategoryDeletion = { ruleIds: string[] };
 export type Category = z.infer<typeof categoryFields> & {
   id: string; parentId: string | null; templateKey: string | null; leaf: boolean;
 };
