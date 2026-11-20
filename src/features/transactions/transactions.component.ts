@@ -43,7 +43,6 @@ export class TransactionsPage {
   private readonly table = viewChild(ITable);
   private request = 0;
   days = 3;
-  confirmClassification = false;
   splits: { categoryId: string; amount: string }[] = [];
 
   constructor() {
@@ -127,7 +126,6 @@ export class TransactionsPage {
   exportResults() { this.table()?.handleDownload(); }
   private show(row: TransactionDetail) {
     this.draft.set(row);
-    this.confirmClassification = false;
     this.splits = row.splits.map((line) => ({ ...line, amount: moneyText(line.amount) }));
     this.matches.set(null);
   }
@@ -139,7 +137,7 @@ export class TransactionsPage {
   changeTreatment(row: TransactionDetail, value: EditTransaction['treatment']) { row.treatment = value; row.categoryId = null; this.splits = []; }
   save(row: TransactionDetail) {
     return this.ui.run(async () => {
-      await this.ui.api.saveTransaction({ ...row, confirmClassification: this.confirmClassification,
+      await this.ui.api.saveTransaction({ ...row,
         splits: this.splits.map((line) => ({ ...line, amount: money(line.amount) })) });
       this.draft.set(null);
       await this.reload();

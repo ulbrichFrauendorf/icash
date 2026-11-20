@@ -191,11 +191,11 @@ it('rolls back the entire import when a later database write fails', async () =>
   expect(db().prepare('SELECT count(*) AS count FROM import_batches').get()).toEqual({ count: 0 });
 });
 
-it('keeps manual classifications and exact splits through bulk rules', async () => {
+it('keeps exact splits through bulk rules', async () => {
   const main = account();
   await importFile(fixture('absa-current.csv'), main.id);
   const grocery = category('Supermarkets');
-  const other = category('Household Supplies');
+  const other = category('Home Goods');
   const purchase = transactionDetail(db(), transaction('Checkers groceries').id);
   expect(purchase.categoryId).toBe(grocery.id);
   saveTransaction(db(), { ...purchase, splits: [{ categoryId: grocery.id, amount: -45000 }, { categoryId: other.id, amount: -5000 }] });
@@ -632,22 +632,24 @@ it('reviews only new uncategorized statement rows and saves consistent overrides
   // Older imports stored approved rule assignments as manual.
   const legacy = transactionDetail(db(), shop[0]!.id);
   saveTransaction(db(), { ...legacy, confirmClassification: true });
-  const protectedRow = transactionDetail(db(), transaction('Checkers groceries').id);
-  saveTransaction(db(), { ...protectedRow, confirmClassification: true });
+  const otherMatch = transactionDetail(db(), transaction('Checkers groceries').id);
+  saveTransaction(db(), { ...otherMatch, confirmClassification: true });
   const otherRule = listRules(db()).find((item) => item.conditions.text === 'CHECKERS')!;
   saveRule(db(), { ...otherRule, categoryId: fuel.id });
   saveRule(db(), { ...savedRule, categoryId: fuel.id });
+  await importFile(file('unmatched.csv', 'Date,Description,Amount\n20250502,Synthetic payout,-50.00'), main.id);
+  const unmatched = transactionDetail(db(), transaction('Synthetic payout').id);
+  saveTransaction(db(), { ...unmatched, categoryId: groceries.id });
 
-  const normalPreview = recategorize(db(), false);
-  expect(normalPreview).toMatchObject({ changes: 1, protected: 2,
-    sample: [{ id: shop[1]!.id, from: groceries.id, to: fuel.id }] });
-  const scopedPreview = recategorize(db(), false, savedRule.id);
-  expect(scopedPreview).toMatchObject({ changes: 2, protected: 1, manualRuleId: savedRule.id });
-  expect(scopedPreview.sample.map(({ id }) => id).sort()).toEqual(shop.map(({ id }) => id).sort());
+  const preview = recategorize(db(), false);
+  expect(preview).toMatchObject({ changes: 3, protected: 0 });
+  expect(preview.sample.map(({ id }) => id).sort()).toEqual([otherMatch.id, ...shop.map(({ id }) => id)].sort());
+  expect(preview.sample.every(({ from, to }) => from === groceries.id && to === fuel.id)).toBe(true);
   expect(transactionDetail(db(), legacy.id).categoryId).toBe(groceries.id);
 
-  expect(recategorize(db(), true, savedRule.id)).toEqual(scopedPreview);
-  expect(transactionDetail(db(), protectedRow.id).categoryId).toBe(groceries.id);
+  expect(recategorize(db(), true)).toEqual(preview);
+  expect(transactionDetail(db(), unmatched.id)).toMatchObject({ categoryId: groceries.id, classification: 'manual' });
+  expect(transactionDetail(db(), otherMatch.id)).toMatchObject({ categoryId: fuel.id, classification: 'rule' });
   for (const row of shop) {
     expect(transactionDetail(db(), row.id)).toMatchObject({ categoryId: fuel.id, classification: 'rule', rule: 'Synthetic Shop' });
   }

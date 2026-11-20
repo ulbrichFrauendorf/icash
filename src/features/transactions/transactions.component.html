@@ -111,12 +111,6 @@
             label="Exclude from reports"
             [(ngModel)]="row.excludeReports"
           />
-          @if (row.classification !== 'manual') {
-            <i-checkbox
-              label="Keep this classification during rule updates"
-              [(ngModel)]="confirmClassification"
-            />
-          }
         </div>
         @if (row.treatment !== 'transfer') {
           <div class="stack">

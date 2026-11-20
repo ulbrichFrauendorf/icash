@@ -310,6 +310,13 @@ test('reviews OpenAI classifications and imported rules before saving', async ()
     await confirmation.getByRole('button', { name: 'Create category and apply' }).click();
     await expect(bakery).toContainText('Bakery Visits');
 
+    await page.getByRole('button', { name: 'Review Synthetic Cobbler', exact: true }).click();
+    const transactionEditor = page.getByRole('dialog', { name: 'Edit transaction' });
+    await transactionEditor.getByRole('button', { name: /^Transaction category:/ }).click();
+    await page.getByRole('option', { name: 'Shopping / Clothing', exact: true }).click();
+    await transactionEditor.getByRole('button', { name: 'Save transaction' }).click();
+    await expect(page.getByText('Transaction saved.')).toBeVisible();
+
     await nav('Rules');
     await expect(page.getByText('Synthetic Cobbler', { exact: true })).toBeVisible();
     await expect(page.getByText('Miscellaneous / Shoe and Bag Repairs', { exact: true })).toBeVisible();
@@ -323,7 +330,7 @@ test('reviews OpenAI classifications and imported rules before saving', async ()
     await page.getByRole('button', { name: 'Preview rule changes' }).click();
     const apply = page.locator('i-card').filter({ has: page.getByRole('heading', { name: 'Apply to previous transactions' }) });
     const comparison = apply.locator('.i-table-virtual-row').filter({ hasText: 'Synthetic Cobbler' });
-    await expect(comparison).toContainText('Miscellaneous / Shoe and Bag Repairs');
+    await expect(comparison).toContainText('Shopping / Clothing');
     await expect(comparison).toContainText('Family / Pets');
     await apply.getByRole('button', { name: 'Apply reviewed changes' }).click();
     await expect(page.getByText('Updated 1 transaction.')).toBeVisible();

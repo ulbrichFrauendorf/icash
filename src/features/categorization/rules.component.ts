@@ -61,7 +61,6 @@ export class RulesPage {
     actions: [{ id: 'category', icon: 'pi pi-pencil', tooltip: (row) => 'Change category for ' + row.match,
       handler: (row) => this.aiRule.set(row) }],
   }));
-  manualRuleId = '';
   editorVisible = false;
   draft = blank();
   constructor() {
@@ -142,20 +141,11 @@ export class RulesPage {
       this.ui.info.set(`Saved ${result.created} ${rules} and categorized ${result.classified} imported ${transactions}.`);
     });
   }
-  manualRuleOptions() {
-    return [
-      { value: '', label: 'Keep manual assignments' },
-      ...rowChoices(this.rules().filter((rule) => rule.enabled), 'id', 'name'),
-    ];
-  }
-  previewRules() {
-    return this.ui.run(async () => this.preview.set(await this.ui.api.previewRules({ manualRuleId: this.manualRuleId || undefined })));
-  }
+  previewRules() { return this.ui.run(async () => this.preview.set(await this.ui.api.previewRules())); }
   applyRules(preview: RulePreview) {
     return this.ui.run(async () => {
       const result = await this.ui.api.applyRules({ preview });
       this.preview.set(null);
-      this.manualRuleId = '';
       this.ui.info.set(result.changes === 1 ? 'Updated 1 transaction.' : `Updated ${result.changes} transactions.`);
     });
   }

@@ -162,10 +162,6 @@
     <i-card class="surface">
       <div class="stack">
         <h2>Apply to previous transactions</h2>
-        @let manualOptions = manualRuleOptions();
-        <i-select label="Include manual matches for" [options]="manualOptions" optionLabel="label"
-          [disabled]="ui.busy()" [ngModel]="selected(manualOptions, manualRuleId)"
-          (ngModelChange)="manualRuleId = $event.value; preview.set(null)" />
         <i-button
           [disabled]="ui.busy()"
           (clicked)="previewRules()"
@@ -176,8 +172,8 @@
         </i-button>
         @if (preview(); as result) {
           <p>
-            {{ result.changes }} changed · {{ result.protected }} manual
-            assignments protected · {{ result.conflicts }} overlapping matches
+            {{ result.changes }} changed · {{ result.protected }} split or paired
+            transactions protected · {{ result.conflicts }} overlapping matches
           </p>
           <i-table [grid]="previewGrid()" dataKey="id" size="small" [sortable]="true" [filterable]="true"
             [globalFilter]="true" [virtualScroll]="true" height="14rem" emptyMessage="No changes to preview." />

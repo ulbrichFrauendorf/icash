@@ -46,7 +46,7 @@ export function categorizer(db: Db) {
   return (row: Classifiable) => classify(row, rules, mappings, eligible);
 }
 
-export function recategorize(db: Db, apply: boolean, manualRuleId?: string): RulePreview {
+export function recategorize(db: Db, apply: boolean): RulePreview {
   return db.transaction(() => {
     const rows = db.prepare(`SELECT id,account_id AS accountId,description,merchant,amount,treatment,category_id AS categoryId,
       classification,rule_id AS ruleId,
@@ -56,17 +56,14 @@ export function recategorize(db: Db, apply: boolean, manualRuleId?: string): Rul
       (Classifiable & Omit<Classification, 'classification'> & { id: string; classification: string; hasSplits: number; hasPair: number })[];
     const write = db.prepare('UPDATE transactions SET category_id=?,treatment=?,classification=?,rule_id=? WHERE id=?');
     const classifyRow = categorizer(db);
-    const result: RulePreview = { changes: 0, protected: 0, conflicts: 0, sample: [], manualRuleId };
+    const result: RulePreview = { changes: 0, protected: 0, conflicts: 0, sample: [] };
     for (const row of rows) {
-      if (row.hasSplits || row.hasPair || (row.classification === 'manual' && !manualRuleId)) {
+      if (row.hasSplits || row.hasPair) {
         result.protected++;
         continue;
       }
       const next = classifyRow(row);
-      if (row.classification === 'manual' && (next.ruleId !== manualRuleId || next.categoryId === row.categoryId)) {
-        result.protected++;
-        continue;
-      }
+      if (row.classification === 'manual' && (!next.ruleId || next.categoryId === row.categoryId)) continue;
       if (next.conflicts) result.conflicts++;
       if (next.categoryId === row.categoryId && next.treatment === row.treatment &&
         next.classification === row.classification && next.ruleId === row.ruleId) continue;

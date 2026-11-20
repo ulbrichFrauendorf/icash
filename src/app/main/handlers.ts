@@ -9,7 +9,7 @@ import { exportBackup, restoreBackup } from '../../features/backup-restore/main'
 import { categories, deleteCategory, previewCategoryDeletion, restoreDefaults, saveCategory } from '../../features/categories/main';
 import { deleteCategoryInput, saveCategoryInput } from '../../features/categories/contract';
 import { portableTemplate, Templates } from '../../features/categories/portable';
-import { merchantInput, rulePreview, rulePreviewOptions, saveRuleInput } from '../../features/categorization/contract';
+import { merchantInput, rulePreview, saveRuleInput } from '../../features/categorization/contract';
 import { listRules, recategorize, saveMerchant, saveRule } from '../../features/categorization/main';
 import { commitInput, decodeInput, importRulesInput, moderateCategoryInput, previewInput, selectImportInput } from '../../features/import-statement/contract';
 import { auditRows, batches, Imports } from '../../features/import-statement/main';
@@ -181,10 +181,10 @@ export function registerHandlers(profiles: ProfileStore, window: () => BrowserWi
     return listRules(db());
   });
   handle('saveMerchant', merchantInput, (input) => saveMerchant(db(), input));
-  handle('previewRules', rulePreviewOptions, ({ manualRuleId }) => recategorize(db(), false, manualRuleId));
+  handle('previewRules', empty, () => recategorize(db(), false));
   handle('applyRules', z.object({ preview: rulePreview }), ({ preview }) => db().transaction(() => {
-    if (JSON.stringify(recategorize(db(), false, preview.manualRuleId)) !== JSON.stringify(preview)) throw new UserError('The preview changed. Review the rules again.');
-    return recategorize(db(), true, preview.manualRuleId);
+    if (JSON.stringify(recategorize(db(), false)) !== JSON.stringify(preview)) throw new UserError('The preview changed. Review the rules again.');
+    return recategorize(db(), true);
   })());
   handle('budget', monthInput, ({ month }) => getBudget(db(), month));
   handle('saveAllocation', allocationInput, (input) => saveAllocation(db(), input));
