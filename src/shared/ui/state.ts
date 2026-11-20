@@ -81,4 +81,3 @@ export class Ui {
 
 export const money = (value: string) => parseMoney(value, '.');
 export const moneyText = decimalMoney;
-export const currentDate = localDate;

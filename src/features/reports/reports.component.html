@@ -17,16 +17,17 @@
     <i-card class="surface">
       <div class="stack">
         <h2>Report filters</h2>
-        <i-input-text
-          [id]="'reports-report-month'"
-          label="Report month"
-          type="month"
-          [ngModel]="month"
-          (ngModelChange)="changeMonth($event)"
-          [disabled]="ui.busy()"
-          [fluid]="true"
-          [forceFloated]="true"
-        />
+        <div class="calendar-field">
+          <span class="muted">Report month</span>
+          <i-calendar
+            label="Report month" [useFloatLabel]="false"
+            view="month"
+            dateFormat="yy-mm"
+            [ngModel]="selectedMonth"
+            (ngModelChange)="changeMonth($event)"
+            [disabled]="ui.busy()"
+          />
+        </div>
         @let choices1 =
           [
             { value: '', label: 'All accounts' },
@@ -143,10 +144,11 @@
                 (ngModelChange)="range = $event.value"
               />
             </div>
-            <icash-chart
-              label="Bar chart of monthly income and spending"
-              [labels]="trendLabels(report, range)"
-              [series]="trendSeries(report, range)"
+            <i-chart
+              aria-label="Bar chart of monthly income and spending"
+              role="img"
+              height="14rem"
+              [charts]="trendChart(report, range)"
             />
             <i-accordion header="View chart data">
               <i-table
@@ -166,11 +168,11 @@
           <div class="stack">
             <h2>Spending by category</h2>
             @if (report.categories.length) {
-              <icash-chart
-                label="Bar chart of top spending categories"
-                type="bar-horizontal"
-                [labels]="categoryLabels(report)"
-                [series]="categorySeries(report)"
+              <i-chart
+                aria-label="Bar chart of top spending categories"
+                role="img"
+                height="14rem"
+                [charts]="categoryChart(report)"
               />
               <i-table
                 [grid]="categoryGrid(report)"
@@ -204,10 +206,11 @@
             @if (account) {
               <p class="muted">Budget figures cover the whole household.</p>
             }
-            <icash-chart
-              label="Bar chart of household budget and actual spending"
-              [labels]="budgetLabels"
-              [series]="budgetSeries(report)"
+            <i-chart
+              aria-label="Bar chart of household budget and actual spending"
+              role="img"
+              height="14rem"
+              [charts]="budgetChart(report)"
             />
             <div class="list-row">
               <span>

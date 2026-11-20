@@ -1,8 +1,8 @@
 import { retainChoice } from '../../shared/ui/choices';
-import { IButton, ICard, ICheckbox, IInputText, IMessage, ISelect, ITable, ITag, PageHeaderActionsDirective, PageHeaderContentDirective, PageLayoutComponent, PageRightSidebarDirective, type GridData, type GridAction, NoContentComponent } from 'invensys-ng';
+import { IButton, ICalendar, ICard, ICheckbox, IInputText, IMessage, ISelect, ITable, ITag, PageHeaderActionsDirective, PageHeaderContentDirective, PageLayoutComponent, PageRightSidebarDirective, type GridData, type GridAction, NoContentComponent } from 'invensys-ng';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { shiftMonth } from '../../shared/finance';
+import { localDate, shiftMonth } from '../../shared/finance';
 import { Ui, money, moneyText } from '../../shared/ui/state';
 import { revealPageSidebar } from '../../shared/ui/navigation';
 import { formatZar, ZarPipe } from '../../shared/ui/pipes';
@@ -11,7 +11,7 @@ import type { Budget, BudgetRow, Recommendations } from './contract';
 
 @Component({
   selector: 'icash-budgets',
-  imports: [FormsModule, ZarPipe, IButton, IInputText, ISelect, ICheckbox, ICard, IMessage, ITable, ITag, NoContentComponent, PageLayoutComponent, PageHeaderActionsDirective, PageHeaderContentDirective, PageRightSidebarDirective],
+  imports: [FormsModule, ZarPipe, IButton, ICalendar, IInputText, ISelect, ICheckbox, ICard, IMessage, ITable, ITag, NoContentComponent, PageLayoutComponent, PageHeaderActionsDirective, PageHeaderContentDirective, PageRightSidebarDirective],
   templateUrl: './budgets.component.html',
 })
 export class BudgetsPage {
@@ -19,7 +19,8 @@ export class BudgetsPage {
   readonly ui = inject(Ui);
   readonly budget = signal<Budget | null>(null);
   readonly recommendations = signal<Recommendations | null>(null);
-  month = this.ui.month();
+  selectedMonth = new Date(this.ui.month() + '-01T12:00:00');
+  get month() { return localDate(this.selectedMonth).slice(0, 7); }
   selected: BudgetRow | null = null;
   editorVisible = true;
   amount = '';
@@ -27,11 +28,12 @@ export class BudgetsPage {
   rollover = false;
 
   constructor() { void this.ui.load(async () => this.budget.set(await this.ui.api.budget({ month: this.month }))); }
-  pick(month: string) {
-    if (!month) return;
+  pick(date: Date | null) {
+    if (!date) return;
+    const month = localDate(date).slice(0, 7);
     return this.ui.run(async () => {
       this.budget.set(await this.ui.api.budget({ month }));
-      this.month = month; this.ui.month.set(month); this.selected = null; this.recommendations.set(null);
+      this.selectedMonth = date; this.ui.month.set(month); this.selected = null; this.recommendations.set(null);
     });
   }
   readonly allocations = computed((): GridData<BudgetRow, BudgetRow> => {

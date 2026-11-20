@@ -5,16 +5,17 @@
     }
   </div>
   <div iPageHeaderActions class="actions">
-    <i-input-text
-      [id]="'budgets-budget-month'"
-      label="Budget month"
-      type="month"
-      [ngModel]="month"
-      (ngModelChange)="pick($event)"
-      [disabled]="ui.busy()"
-      [fluid]="true"
-      [forceFloated]="true"
-    />
+    <div class="calendar-field">
+      <span class="muted">Budget month</span>
+      <i-calendar
+        label="Budget month" [useFloatLabel]="false"
+        view="month"
+        dateFormat="yy-mm"
+        [ngModel]="selectedMonth"
+        (ngModelChange)="pick($event)"
+        [disabled]="ui.busy()"
+      />
+    </div>
   </div>
   @if (selected; as current) {
     <section iPageRightSidebar id="allocation-editor" label="Allocation editor" [(visible)]="editorVisible">

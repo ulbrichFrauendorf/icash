@@ -20,6 +20,23 @@ test('imports, corrects, budgets, restarts, and restores a household in Electron
       await scope.getByRole('button', { name: new RegExp('^' + label + ':') }).click();
       await page.getByRole('option', { name: option, exact: true }).click();
     };
+    const calendar = () => page.locator('.i-calendar-panel');
+    const pickMonth = async (label: string, year: number, month: string, value: string) => {
+      const field = page.getByLabel(label, { exact: true });
+      const currentYear = Number((await field.inputValue()).slice(0, 4));
+      await field.click();
+      if (currentYear !== year) {
+        await calendar().getByRole('button', { name: String(currentYear), exact: true }).click();
+        const decade = Math.floor(year / 10) * 10;
+        for (let shown = Math.floor(currentYear / 10) * 10; shown !== decade; shown += Math.sign(decade - shown) * 10) {
+          const direction = shown > decade ? 'Previous' : 'Next';
+          await calendar().locator('i-button[aria-label="' + direction + '"] button').click();
+        }
+        await calendar().getByRole('button', { name: String(year), exact: true }).click();
+      }
+      await calendar().getByRole('button', { name: month, exact: true }).click();
+      await expect(field).toHaveValue(value);
+    };
     const expandGroceries = async () => {
       const group = page.getByRole('row').filter({ has: page.getByRole('cell', { name: 'Groceries', exact: true }) });
       await group.waitFor();
@@ -81,7 +98,7 @@ test('imports, corrects, budgets, restarts, and restores a household in Electron
     await expect(page.getByText('Transaction saved.')).toBeVisible();
 
     await nav('Budgets');
-    await page.getByLabel('Budget month').fill('2025-05');
+    await pickMonth('Budget month', 2025, 'May', '2025-05');
     await expandGroceries();
     await page.getByRole('button', { name: 'Edit allocation for Supermarkets' }).click();
     await page.getByLabel('Budget amount (R)').fill('2000.00');
@@ -96,6 +113,9 @@ test('imports, corrects, budgets, restarts, and restores a household in Electron
     await expect(page.getByRole('img', { name: 'iCash logo' })).toHaveAttribute('src', /invensys-icon-dark/);
 
     await nav('Overview');
+    await pickMonth('Report month', 2025, 'Jun', '2025-06');
+    await expect(page.getByText('2025-05-25 to 2025-06-24')).toBeVisible();
+    await pickMonth('Report month', 2025, 'May', '2025-05');
     await expect(page.getByTestId('income')).toContainText(/10\s?000,00/);
     await expect(page.getByRole('img', { name: 'Bar chart of monthly income and spending' })).toBeVisible();
 
@@ -113,7 +133,7 @@ test('imports, corrects, budgets, restarts, and restores a household in Electron
     await expect(page.getByText('Synthetic household')).toBeVisible();
     await expect(page.locator('body')).toHaveClass('dark');
     await nav('Budgets');
-    await page.getByLabel('Budget month').fill('2025-05');
+    await pickMonth('Budget month', 2025, 'May', '2025-05');
     await expandGroceries();
     await expect(supermarkets()).toContainText(/1\s?580,00/);
 
@@ -147,12 +167,43 @@ test('imports, corrects, budgets, restarts, and restores a household in Electron
     await newCategory.getByRole('button', { name: 'Save category' }).click();
     await expect(newCategory).toHaveCount(0);
 
+    await nav('Savings goals');
+    await page.getByLabel('Goal name').fill('Emergency fund');
+    await page.getByLabel('Target amount (R)').fill('1000.00');
+    const cell = () => page.getByRole('row').filter({ has: page.getByRole('cell', { name: 'Emergency fund', exact: true }) });
+    const pickDay = async (label: string) => {
+      const field = page.getByLabel(label, { exact: true });
+      await field.click();
+      await calendar().getByRole('button', { name: '15', exact: true }).click();
+      await expect(field).toHaveValue(/^\d{4}-\d{2}-15$/);
+      return field.inputValue();
+    };
+    const due = await pickDay('Target date');
+    await page.getByRole('button', { name: 'Save goal' }).click();
+    await expect(cell()).toContainText(due);
+    await nav('Overview');
+    await nav('Savings goals');
+    await cell().getByRole('button', { name: 'Edit Emergency fund' }).click();
+    await expect(page.getByLabel('Target date', { exact: true })).toHaveValue(due);
+    await page.getByRole('button', { name: 'Clear target date' }).click();
+    await expect(page.getByLabel('Target date', { exact: true })).toHaveValue('');
+    await page.getByRole('button', { name: 'Save goal' }).click();
+    await expect(page.getByText('Savings goal saved.')).toBeVisible();
+    await expect(cell()).not.toContainText(due);
+    await cell().getByRole('button', { name: 'Record movement for Emergency fund' }).click();
+    await page.getByLabel('Signed amount (R)').fill('100.00');
+    const entry = await pickDay('Entry date');
+    await page.getByRole('button', { name: 'Record movement', exact: true }).click();
+    await expect(page.getByText('Savings movement recorded.')).toBeVisible();
+    await cell().getByRole('button', { name: 'Expand details' }).click();
+    await expect(page.getByRole('cell', { name: entry, exact: true })).toBeVisible();
+
     await nav('Settings');
     await page.getByLabel('Payday (1–31)', { exact: true }).fill('25');
     await page.getByRole('button', { name: 'Save payday' }).click();
     await expect(page.getByText('Payday saved.')).toBeVisible();
     await nav('Budgets');
-    await page.getByLabel('Budget month').fill('2025-06');
+    await pickMonth('Budget month', 2025, 'Jun', '2025-06');
     await expect(page.getByText('Budget period 2025-05-25 to 2025-06-24')).toBeVisible();
     await page.getByRole('button', { name: 'Review spending for Uncategorized' }).click();
     await expect(page.getByText('Budget contributors')).toBeVisible();

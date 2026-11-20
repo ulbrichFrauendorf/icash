@@ -24,15 +24,13 @@
           required
           [fluid]="true"
         />
-        <i-input-text
-          [id]="'savings-target-date'"
-          label="Target date"
-          name="date"
-          [(ngModel)]="draft.due"
-          type="date"
-          [fluid]="true"
-          [forceFloated]="true"
-        />
+        <div class="calendar-field">
+          <span class="muted">Target date</span>
+          <i-calendar label="Target date" [useFloatLabel]="false" name="date" placeholder="Optional" dateFormat="yy-mm-dd" [(ngModel)]="draft.due" />
+        </div>
+        @if (draft.due) {
+          <i-button size="small" severity="secondary" [text]="true" (clicked)="draft.due = null">Clear target date</i-button>
+        }
         <div class="actions">
           <i-button
             type="submit"
@@ -91,14 +89,10 @@
             placeholder="Use a negative amount for a withdrawal"
             [fluid]="true"
           />
-          <i-input-text
-            [id]="'savings-entry-date'"
-            label="Entry date"
-            [(ngModel)]="date"
-            type="date"
-            [fluid]="true"
-            [forceFloated]="true"
-          />
+          <div class="calendar-field">
+            <span class="muted">Entry date</span>
+            <i-calendar label="Entry date" [useFloatLabel]="false" dateFormat="yy-mm-dd" [(ngModel)]="date" />
+          </div>
           <i-button
             [disabled]="ui.busy() || !goalId || !amount || !date"
             (clicked)="contribute()"
