@@ -469,9 +469,21 @@ export class Imports {
         if (state === 'duplicate') counts.duplicate++;
         audit.run(counts.id, row.row, state, row.message, JSON.stringify(row.original), transactionId);
       }
-      const rulesSaved = approvals.length ? saveApprovedRules(db, approvals).size : 0;
+      const created = approvals.length ? saveApprovedRules(db, approvals) : new Set<string>();
+      if (created.size) {
+        const approvedRows = new Set(approvals.flatMap((approval) => approval.rows));
+        const classifyWithNewRules = categorizer(db);
+        const link = db.prepare(`UPDATE transactions SET classification='rule',rule_id=?
+          WHERE id=? AND category_id=? AND treatment=? AND classification='manual'`);
+        for (const { row, candidate } of rows) {
+          const id = insertedByRow.get(row);
+          if (!id || !candidate || !approvedRows.has(row)) continue;
+          const next = classifyWithNewRules({ ...candidate, accountId: session.accountId, merchant: '' });
+          if (next.ruleId && created.has(next.ruleId)) link.run(next.ruleId, id, next.categoryId, next.treatment);
+        }
+      }
       db.prepare('UPDATE accounts SET mapping=? WHERE id=?').run(JSON.stringify(preview.mapping), session.accountId);
-      return rulesSaved ? { ...counts, rulesSaved } : counts;
+      return created.size ? { ...counts, rulesSaved: created.size } : counts;
     }).immediate();
     this.ledgerVersion++;
     this.clear();

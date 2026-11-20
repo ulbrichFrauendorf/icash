@@ -46,17 +46,27 @@ export function categorizer(db: Db) {
   return (row: Classifiable) => classify(row, rules, mappings, eligible);
 }
 
-export function recategorize(db: Db, apply: boolean): RulePreview {
+export function recategorize(db: Db, apply: boolean, manualRuleId?: string): RulePreview {
   return db.transaction(() => {
     const rows = db.prepare(`SELECT id,account_id AS accountId,description,merchant,amount,treatment,category_id AS categoryId,
-      classification,rule_id AS ruleId FROM transactions ORDER BY date,id`).all() as
-      (Classifiable & Omit<Classification, 'classification'> & { id: string; classification: string })[];
+      classification,rule_id AS ruleId,
+      EXISTS(SELECT 1 FROM splits WHERE transaction_id=t.id) AS hasSplits,
+      EXISTS(SELECT 1 FROM transfer_legs WHERE transaction_id=t.id) AS hasPair
+      FROM transactions t ORDER BY date,id`).all() as
+      (Classifiable & Omit<Classification, 'classification'> & { id: string; classification: string; hasSplits: number; hasPair: number })[];
     const write = db.prepare('UPDATE transactions SET category_id=?,treatment=?,classification=?,rule_id=? WHERE id=?');
     const classifyRow = categorizer(db);
-    const result: RulePreview = { changes: 0, protected: 0, conflicts: 0, sample: [] };
+    const result: RulePreview = { changes: 0, protected: 0, conflicts: 0, sample: [], manualRuleId };
     for (const row of rows) {
-      if (row.classification === 'manual') { result.protected++; continue; }
+      if (row.hasSplits || row.hasPair || (row.classification === 'manual' && !manualRuleId)) {
+        result.protected++;
+        continue;
+      }
       const next = classifyRow(row);
+      if (row.classification === 'manual' && (next.ruleId !== manualRuleId || next.categoryId === row.categoryId)) {
+        result.protected++;
+        continue;
+      }
       if (next.conflicts) result.conflicts++;
       if (next.categoryId === row.categoryId && next.treatment === row.treatment &&
         next.classification === row.classification && next.ruleId === row.ruleId) continue;

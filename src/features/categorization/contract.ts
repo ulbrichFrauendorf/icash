@@ -18,4 +18,10 @@ export const saveRuleInput = z.object({
 });
 export const merchantInput = z.object({ merchant: name, direction: z.enum(['debit', 'credit']), categoryId: id });
 export type Rule = Omit<z.infer<typeof saveRuleInput>, 'id'> & { id: string; source: 'user' | 'default' };
-export type RulePreview = { changes: number; protected: number; conflicts: number; sample: { id: string; description: string; from: string | null; to: string | null }[] };
+export const rulePreviewOptions = z.object({ manualRuleId: id.optional() });
+export const rulePreview = z.object({
+  changes: z.int().min(0), protected: z.int().min(0), conflicts: z.int().min(0),
+  sample: z.array(z.object({ id, description: z.string().max(500), from: id.nullable(), to: id.nullable() })).max(100),
+  ...rulePreviewOptions.shape,
+});
+export type RulePreview = z.infer<typeof rulePreview>;

@@ -2,7 +2,7 @@ import type { z } from 'zod';
 import type { Account, saveAccountInput } from '../features/accounts/contract';
 import type { Category, CategoryDeletion, deleteCategoryInput, saveCategoryInput } from '../features/categories/contract';
 import type { TemplatePreview } from '../features/categories/portable';
-import type { merchantInput, Rule, RulePreview, saveRuleInput } from '../features/categorization/contract';
+import type { merchantInput, Rule, RulePreview, rulePreviewOptions, saveRuleInput } from '../features/categorization/contract';
 import type { AuditRow, Batch, commitInput, decodeInput, FilePreview, ImportPreview, ImportModeration, ImportRule, ResumableImport, moderateCategoryInput, importRulesInput, ImportResult, previewInput, selectImportInput } from '../features/import-statement/contract';
 import type { allocationInput, Budget, closeInput, copyInput, defaultInput, Recommendations } from '../features/monthly-budget/contract';
 import type { AiClassification, AiRules, AiStatus, applyAiRulesInput, openAiKeyInput } from '../features/openai/contract';
@@ -59,7 +59,7 @@ export interface Requests {
   saveRule: [Data<typeof saveRuleInput>, Rule[]];
   deleteRule: [ID, Rule[]];
   saveMerchant: [Data<typeof merchantInput>, void];
-  previewRules: [undefined, RulePreview];
+  previewRules: [Data<typeof rulePreviewOptions>, RulePreview];
   applyRules: [{ preview: RulePreview }, RulePreview];
   budget: [Month, Budget];
   saveAllocation: [Data<typeof allocationInput>, Budget];

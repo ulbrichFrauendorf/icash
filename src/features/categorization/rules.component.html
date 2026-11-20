@@ -162,6 +162,10 @@
     <i-card class="surface">
       <div class="stack">
         <h2>Apply to previous transactions</h2>
+        @let manualOptions = manualRuleOptions();
+        <i-select label="Include manual matches for" [options]="manualOptions" optionLabel="label"
+          [disabled]="ui.busy()" [ngModel]="selected(manualOptions, manualRuleId)"
+          (ngModelChange)="manualRuleId = $event.value; preview.set(null)" />
         <i-button
           [disabled]="ui.busy()"
           (clicked)="previewRules()"

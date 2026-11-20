@@ -313,13 +313,27 @@ test('reviews OpenAI classifications and imported rules before saving', async ()
     await nav('Rules');
     await expect(page.getByText('Synthetic Cobbler', { exact: true })).toBeVisible();
     await expect(page.getByText('Miscellaneous / Shoe and Bag Repairs', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Edit Synthetic Cobbler' }).click();
+    const editRule = page.getByRole('dialog', { name: 'Edit rule' });
+    await editRule.getByRole('button', { name: /^Target category:/ }).click();
+    await page.getByRole('option', { name: 'Family / Pets', exact: true }).click();
+    await editRule.getByRole('button', { name: 'Save rule' }).click();
+    await expect(page.getByText('Rule saved.')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Preview rule changes' }).click();
+    const apply = page.locator('i-card').filter({ has: page.getByRole('heading', { name: 'Apply to previous transactions' }) });
+    const comparison = apply.locator('.i-table-virtual-row').filter({ hasText: 'Synthetic Cobbler' });
+    await expect(comparison).toContainText('Miscellaneous / Shoe and Bag Repairs');
+    await expect(comparison).toContainText('Family / Pets');
+    await apply.getByRole('button', { name: 'Apply reviewed changes' }).click();
+    await expect(page.getByText('Updated 1 transaction.')).toBeVisible();
     await nav('Transactions');
     const classifyCobbler = page.getByRole('button', { name: 'AI classify Synthetic Cobbler' });
     const cobbler = page.locator('i-table .i-table-virtual-row').filter({ has: classifyCobbler });
-    await expect(cobbler).toContainText('Shoe and Bag Repairs');
+    await expect(cobbler).toContainText('Pets');
     await classifyCobbler.click();
     const existingRule = page.getByRole('dialog', { name: 'Apply existing rule' });
-    await expect(existingRule.getByText('Miscellaneous / Shoe and Bag Repairs', { exact: true })).toBeVisible();
+    await expect(existingRule.getByText('Family / Pets', { exact: true })).toBeVisible();
     await existingRule.getByRole('button', { name: 'Apply classification' }).click();
     await expect(page.getByText('Existing rule applied.')).toBeVisible();
 

@@ -61,6 +61,7 @@ export class RulesPage {
     actions: [{ id: 'category', icon: 'pi pi-pencil', tooltip: (row) => 'Change category for ' + row.match,
       handler: (row) => this.aiRule.set(row) }],
   }));
+  manualRuleId = '';
   editorVisible = false;
   draft = blank();
   constructor() {
@@ -90,7 +91,8 @@ export class RulesPage {
   }
   save() {
     return this.ui.run(async () => {
-      this.rules.set(await this.ui.api.saveRule({ ...this.draft, conditions: {
+      const { id, name, categoryId, priority, enabled } = this.draft;
+      this.rules.set(await this.ui.api.saveRule({ id, name, categoryId, priority, enabled, conditions: {
         field: this.draft.field, operator: this.draft.operator, text: this.draft.text.trim() || undefined,
         direction: this.draft.direction || undefined, accountId: this.draft.accountId || undefined,
         minimum: this.draft.minimum ? money(this.draft.minimum) : undefined, maximum: this.draft.maximum ? money(this.draft.maximum) : undefined,
@@ -140,8 +142,21 @@ export class RulesPage {
       this.ui.info.set(`Saved ${result.created} ${rules} and categorized ${result.classified} imported ${transactions}.`);
     });
   }
-  previewRules() { return this.ui.run(async () => this.preview.set(await this.ui.api.previewRules())); }
+  manualRuleOptions() {
+    return [
+      { value: '', label: 'Keep manual assignments' },
+      ...rowChoices(this.rules().filter((rule) => rule.enabled), 'id', 'name'),
+    ];
+  }
+  previewRules() {
+    return this.ui.run(async () => this.preview.set(await this.ui.api.previewRules({ manualRuleId: this.manualRuleId || undefined })));
+  }
   applyRules(preview: RulePreview) {
-    return this.ui.run(async () => { await this.ui.api.applyRules({ preview }); this.preview.set(null); }, 'Reviewed changes applied.');
+    return this.ui.run(async () => {
+      const result = await this.ui.api.applyRules({ preview });
+      this.preview.set(null);
+      this.manualRuleId = '';
+      this.ui.info.set(result.changes === 1 ? 'Updated 1 transaction.' : `Updated ${result.changes} transactions.`);
+    });
   }
 }

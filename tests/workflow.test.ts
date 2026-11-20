@@ -621,7 +621,35 @@ it('reviews only new uncategorized statement rows and saves consistent overrides
   expect(result).toMatchObject({ inserted: 3, duplicate: 1, rulesSaved: 1 });
   const shop = transactions().filter((row) => row.description === 'Synthetic shop Rivonia CARD NO');
   expect(shop.map((row) => row.categoryId)).toEqual([groceries.id, groceries.id]);
-  expect(listRules(db()).find((rule) => rule.conditions.text === 'SYNTHETIC SHOP')).toMatchObject({
+  const savedRule = listRules(db()).find((rule) => rule.conditions.text === 'SYNTHETIC SHOP')!;
+  expect(savedRule).toMatchObject({
     categoryId: groceries.id, name: 'Synthetic Shop', conditions: { field: 'description', operator: 'contains' },
   });
+  expect(shop.map(({ classification, rule }) => ({ classification, rule }))).toEqual([
+    { classification: 'rule', rule: 'Synthetic Shop' }, { classification: 'rule', rule: 'Synthetic Shop' },
+  ]);
+
+  // Older imports stored approved rule assignments as manual.
+  const legacy = transactionDetail(db(), shop[0]!.id);
+  saveTransaction(db(), { ...legacy, confirmClassification: true });
+  const protectedRow = transactionDetail(db(), transaction('Checkers groceries').id);
+  saveTransaction(db(), { ...protectedRow, confirmClassification: true });
+  const otherRule = listRules(db()).find((item) => item.conditions.text === 'CHECKERS')!;
+  saveRule(db(), { ...otherRule, categoryId: fuel.id });
+  saveRule(db(), { ...savedRule, categoryId: fuel.id });
+
+  const normalPreview = recategorize(db(), false);
+  expect(normalPreview).toMatchObject({ changes: 1, protected: 2,
+    sample: [{ id: shop[1]!.id, from: groceries.id, to: fuel.id }] });
+  const scopedPreview = recategorize(db(), false, savedRule.id);
+  expect(scopedPreview).toMatchObject({ changes: 2, protected: 1, manualRuleId: savedRule.id });
+  expect(scopedPreview.sample.map(({ id }) => id).sort()).toEqual(shop.map(({ id }) => id).sort());
+  expect(transactionDetail(db(), legacy.id).categoryId).toBe(groceries.id);
+
+  expect(recategorize(db(), true, savedRule.id)).toEqual(scopedPreview);
+  expect(transactionDetail(db(), protectedRow.id).categoryId).toBe(groceries.id);
+  for (const row of shop) {
+    expect(transactionDetail(db(), row.id)).toMatchObject({ categoryId: fuel.id, classification: 'rule', rule: 'Synthetic Shop' });
+  }
+  expect(recategorize(db(), false).changes).toBe(0);
 });
